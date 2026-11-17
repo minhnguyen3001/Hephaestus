@@ -9,6 +9,7 @@ export interface CityMetrics {
   floorAreaKm2: number;
   greenHa: number;
   roadKm: number;
+  bikeKm: number;
   estimatedHeights: number; // share 0..1
   transitAccess: number; // share of residents within 400 m of a transit stop (rail/metro lines and drawn lines)
   parkAccess: number; // share of residents within 300 m of a park
@@ -48,9 +49,12 @@ export function cityMetrics(w: WorldData): CityMetrics {
   let green = 0;
   for (const a of w.areas) if (a.kind === 'park') green += Math.abs(signedArea(a.polygon));
   let road = 0;
+  let bike = 0;
   for (const r of w.roads) {
-    if (r.kind === 'footway' || r.kind === 'cycleway') continue;
-    for (let i = 1; i < r.points.length; i++) road += Math.hypot(r.points[i][0] - r.points[i - 1][0], r.points[i][1] - r.points[i - 1][1]);
+    let l = 0;
+    for (let i = 1; i < r.points.length; i++) l += Math.hypot(r.points[i][0] - r.points[i - 1][0], r.points[i][1] - r.points[i - 1][1]);
+    if (r.kind === 'cycleway' || r.bikeLane) bike += l;
+    if (r.kind !== 'footway' && r.kind !== 'cycleway') road += l;
   }
   return {
     buildings: w.buildings.length,
@@ -59,6 +63,7 @@ export function cityMetrics(w: WorldData): CityMetrics {
     floorAreaKm2: fa / 1e6,
     greenHa: green / 1e4,
     roadKm: road / 1000,
+    bikeKm: bike / 1000,
     estimatedHeights: w.buildings.length ? est / w.buildings.length : 0,
     transitAccess: res ? resTransit / res : 0,
     parkAccess: res ? resPark / res : 0,

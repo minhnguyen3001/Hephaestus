@@ -275,6 +275,8 @@ export class Simulation {
   private filled = false;
   private samplers!: Record<'residents' | 'jobs' | 'attract' | 'school' | 'freight' | 'any', ReturnType<typeof makeSampler<Site>>>;
   totals = { residents: 0, jobs: 0 };
+  /** Share of street length with bike lanes or cycleways (0..1). */
+  bikeShare = 0;
   day: DayType = 'weekday';
   /** Multiplier on travel demand (timeline projections). Capped to protect frame rate. */
   demandScale = 1;
@@ -283,6 +285,16 @@ export class Simulation {
   constructor(world: WorldData, readonly region: RegionProfile, public maxAgents = 400, seed = 1) {
     this.rand = rng(seed);
     this.graph = RoadGraph.build(world.roads);
+    let bike = 0;
+    let street = 0;
+    for (const r of world.roads) {
+      if (r.kind === 'footway' || r.tunnel) continue;
+      let l = 0;
+      for (let i = 1; i < r.points.length; i++) l += dist(r.points[i - 1], r.points[i]);
+      street += l;
+      if (r.kind === 'cycleway' || r.bikeLane) bike += l;
+    }
+    this.bikeShare = street ? bike / street : 0;
     this.buildSites(world);
     this.buildSignals(new Set(world.signalNodes));
     this.buildBusRoutes(world.radius);
@@ -656,7 +668,8 @@ export class Simulation {
       w.taxi += moved * 0.15;
     }
     w.walk *= d < 400 ? 8 : d < 1000 ? 2 : d > 2500 ? 0.1 : 1;
-    w.bicycle *= d < 300 ? 0.3 : 1;
+    // more protected bike network → more people choose to cycle (capped)
+    w.bicycle *= (d < 300 ? 0.3 : 1) * (1 + Math.min(1.5, this.bikeShare * 3));
     if (!hasStops || d < 300) w.bus = 0;
     const total = Object.values(w).reduce((a, b) => a + b, 0);
     let x = this.rand() * total;
@@ -776,7 +789,7 @@ export class Simulation {
       kind = 'pedestrian';
     } else if (mode === 'bicycle') {
       kind = 'bicycle';
-      path = g.route(o.walkNode, d.walkNode, 'walk');
+      path = g.route(o.walkNode, d.walkNode, 'bike');
     } else {
       kind = mode;
       if (o.carNode < 0 || d.carNode < 0) return false;

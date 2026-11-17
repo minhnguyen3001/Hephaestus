@@ -19,7 +19,7 @@ export type Edit =
   | { kind: 'removeNote'; id: string }
   | { kind: 'removeLine'; id: string };
 
-export type RoadPatch = Partial<Pick<Road, 'lanes' | 'oneway' | 'maxspeedKmh' | 'kind'>>;
+export type RoadPatch = Partial<Pick<Road, 'lanes' | 'oneway' | 'maxspeedKmh' | 'kind' | 'bikeLane'>>;
 
 export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
   if (edits.length === 0) return base;

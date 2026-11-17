@@ -247,6 +247,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
         name: tags.name,
         bridge: tags.bridge !== undefined && tags.bridge !== 'no',
         tunnel: tags.tunnel !== undefined && tags.tunnel !== 'no',
+        bikeLane: ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both'].some((k) => ['lane', 'track', 'opposite_lane', 'opposite_track'].includes(tags[k])) || undefined,
         origin: 'real',
       });
       continue;
@@ -312,7 +313,7 @@ export const packFile = (c: LatLon) => `${c.lat.toFixed(4)}_${c.lon.toFixed(4)}.
 const KEEP_TAGS = new Set([
   'building', 'building:levels', 'height', 'amenity', 'shop', 'office', 'name', 'highway', 'oneway', 'junction', 'lanes',
   'maxspeed', 'bridge', 'tunnel', 'layer', 'area', 'railway', 'natural', 'waterway', 'landuse', 'leisure', 'type',
-  'public_transport', 'station',
+  'public_transport', 'station', 'cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both',
 ]);
 const r6 = (g: { lat: number; lon: number }) => ({ lat: Math.round(g.lat * 1e6) / 1e6, lon: Math.round(g.lon * 1e6) / 1e6 });
 

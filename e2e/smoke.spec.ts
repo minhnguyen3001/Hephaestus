@@ -307,3 +307,13 @@ test('weather changes the scene', async ({ page }) => {
   await page.waitForTimeout(2500);
   await page.screenshot({ path: 'test-results/23-snow.png' });
 });
+
+test('Amsterdam shows bike network and cyclists', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Amsterdam/ }).click();
+  await expect(page.locator('.dashboard .metric').filter({ hasText: 'Bike network' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'District' }).click();
+  await page.waitForTimeout(4000);
+  await page.screenshot({ path: 'test-results/24-amsterdam-2d.png' });
+});

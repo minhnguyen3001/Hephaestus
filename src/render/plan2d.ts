@@ -44,6 +44,7 @@ export class Plan2D implements WorldRenderer {
   private scale = 1; // px per meter
   private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true, underground: false };
   private subwayPath = new Path2D();
+  private bikePath = new Path2D();
   private treePath = new Path2D();
   private roadById = new Map<string, { path: Path2D; width: number }>();
   private fills: { color: string; path: Path2D }[] = [];
@@ -98,7 +99,7 @@ export class Plan2D implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
+    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}:${+!!r.bikeLane}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
     if (!this.sim || sig !== this.roadSig || region !== this.region) this.startSim(world, region, 1);
     this.roadSig = sig;
     this.region = region;
@@ -275,6 +276,8 @@ export class Plan2D implements WorldRenderer {
       this.treePath.arc(t.p[0], t.p[1], 2.4 * t.scale, 0, Math.PI * 2);
     }
     this.railPath = new Path2D();
+    this.bikePath = new Path2D();
+    for (const r of w.roads) if (r.bikeLane && r.kind !== 'cycleway') this.bikePath.addPath(this.linePath(r.points));
     this.subwayPath = new Path2D();
     for (const r of w.rails) (r.tunnel ? this.subwayPath : this.railPath).addPath(this.linePath(r.points));
   }
@@ -476,6 +479,9 @@ export class Plan2D implements WorldRenderer {
       ctx.lineWidth = Math.max(r.width, px);
       ctx.stroke(r.path);
     }
+    ctx.strokeStyle = 'rgba(63,174,106,0.9)';
+    ctx.lineWidth = Math.max(1.6, 1.5 * px);
+    ctx.stroke(this.bikePath);
     if (this.layers.traffic && this.sim) {
       for (const [id, r] of this.sim.roadSpeed) {
         const road = this.roadById.get(id);

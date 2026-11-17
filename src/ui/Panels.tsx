@@ -59,6 +59,9 @@ export function Inspector({
               <label className="field row-check">
                 <input type="checkbox" checked={sel.road.oneway} disabled={!editable} onChange={(e) => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { oneway: e.target.checked } })} /> One-way
               </label>
+              <label className="field row-check">
+                <input type="checkbox" checked={!!sel.road.bikeLane} disabled={!editable} onChange={(e) => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { bikeLane: e.target.checked } })} /> Bike lanes
+              </label>
               {editable && <button onClick={() => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { kind: 'footway', oneway: false } })}>Make pedestrian street</button>}
             </>
           ) : <p className="note">Pedestrian/cycle path — cars can’t use it.</p>}
@@ -276,6 +279,7 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
         <Metric label="Job capacity" value={fmt(proposed.jobs)} d={delta(proposed.jobs, original.jobs)} />
         <Metric label="Floor area" value={`${proposed.floorAreaKm2.toFixed(2)} km²`} d={delta(proposed.floorAreaKm2, original.floorAreaKm2, 2)} />
         <Metric label="Road network" value={`${proposed.roadKm.toFixed(1)} km`} d={delta(proposed.roadKm, original.roadKm, 1)} />
+        <Metric label="Bike network" value={`${proposed.bikeKm.toFixed(1)} km`} d={delta(proposed.bikeKm, original.bikeKm, 1)} />
         <Metric label="Green space" value={`${proposed.greenHa.toFixed(1)} ha`} d={delta(proposed.greenHa, original.greenHa, 1)} />
         <Metric label="Near transit (400 m)" value={`${Math.round(proposed.transitAccess * 100)}% of residents`} d={delta(proposed.transitAccess * 100, original.transitAccess * 100)} />
         <Metric label="Near a park (300 m)" value={`${Math.round(proposed.parkAccess * 100)}% of residents`} d={delta(proposed.parkAccess * 100, original.parkAccess * 100)} />

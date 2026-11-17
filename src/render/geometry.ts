@@ -178,6 +178,18 @@ function normal(a: Vec2, b: Vec2): Vec2 | null {
   return l < 1e-6 ? null : [-dy / l, dx / l];
 }
 
+/** A polyline shifted sideways by d meters (positive = left of travel direction). */
+export function offsetLine(points: Vec2[], d: number): Vec2[] {
+  return points.map((p, i) => {
+    const a = points[Math.max(0, i - 1)];
+    const b = points[Math.min(points.length - 1, i + 1)];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const l = Math.hypot(dx, dy) || 1;
+    return [p[0] - (dy / l) * d, p[1] + (dx / l) * d] as Vec2;
+  });
+}
+
 export function polygonGeometry(poly: Vec2[], y: Height, color: THREE.Color, holes: Vec2[][] = []): THREE.BufferGeometry | null {
   if (poly.length < 3) return null;
   const all = [poly, ...holes].flat();

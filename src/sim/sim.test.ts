@@ -303,6 +303,24 @@ describe('road editing and access metrics', () => {
   });
 });
 
+describe('bike lanes', () => {
+  it('cyclists prefer bike lanes and more bike network grows cycling', () => {
+    const base = gridFixture();
+    const g0 = RoadGraph.build(base.roads);
+    const from = g0.index.get('n11')!;
+    const to = g0.index.get('n15')!;
+    // give a parallel street a bike lane; the bike route should use it even if slightly longer
+    const laned = applyEdits(base, base.roads.filter((r) => r.points.every((p) => Math.abs(p[0] + 100) < 1)).map((r) => ({ kind: 'setRoad' as const, id: r.id, patch: { bikeLane: true } })));
+    const g1 = RoadGraph.build(laned.roads);
+    const path = g1.route(g1.index.get('n11')!, g1.index.get('n15')!, 'bike')!;
+    expect(path.some((e) => laned.roads.find((r) => r.id === g1.edges[e].roadId)?.bikeLane)).toBe(true);
+    expect(g0.route(from, to, 'bike')).not.toBeNull();
+    const s0 = new Simulation(base, profileFor('nl'), 100, 1);
+    const s1 = new Simulation(applyEdits(base, base.roads.map((r) => ({ kind: 'setRoad' as const, id: r.id, patch: { bikeLane: true } }))), profileFor('nl'), 100, 1);
+    expect(s1.bikeShare).toBeGreaterThan(s0.bikeShare);
+  });
+});
+
 describe('zoning', () => {
   it('fills a zone with buildings clear of streets, and makes parks', () => {
     const base = gridFixture();

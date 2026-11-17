@@ -14,7 +14,7 @@ import type { AgentView } from '../sim/protocol';
 import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type DayType, type SimStats, type Weather } from '../sim/simulation';
 
 export type { AgentInfo };
-import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
+import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
 import { PRESETS, resolveQuality, type Quality, type QualitySetting } from './quality';
 import { pickMode, ToolController, type Tool, type ZoneOptions } from './tools';
 import { ZONE_COLORS } from './palette';
@@ -325,7 +325,7 @@ export class Engine implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
+    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}:${+!!r.bikeLane}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
     if (!this.sim || sig !== this.roadSignature || region !== this.region) {
       this.startSim(world, region, 1);
       this.roadSignature = sig;
@@ -546,6 +546,13 @@ export class Engine implements WorldRenderer {
       const ground = road.bridge ? (p: Vec2) => this.deckH(p[0], p[1]) : this.hp;
       const g = ribbonGeometry(road.points, roadWidth(road), (p) => ground(p) + lift + ROAD_Y[road.kind], color);
       if (g) roadItems.push({ id: road.id, geom: g });
+      if (road.bikeLane && road.kind !== 'footway' && road.kind !== 'cycleway') {
+        const hw = roadWidth(road) / 2 - 0.8;
+        for (const side of [-1, 1]) {
+          const b = ribbonGeometry(offsetLine(road.points, side * hw), 1.3, (p) => ground(p) + lift + ROAD_Y[road.kind] + 0.012, new THREE.Color(0x3fae6a));
+          if (b) roadItems.push({ id: `${road.id}#m`, geom: b });
+        }
+      }
       if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
         const c = ribbonGeometry(road.points, 0.18, (p) => ground(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
         if (c) roadItems.push({ id: `${road.id}#m`, geom: c });

@@ -1,7 +1,7 @@
 import type { Road, RoadKind, Vec2 } from '../geo/types';
 import { dist } from '../geo/util';
 
-export type Mode = 'car' | 'walk';
+export type Mode = 'car' | 'walk' | 'bike';
 
 export interface GNode {
   id: string;
@@ -22,6 +22,8 @@ export interface GEdge {
   dir: Vec2; // unit direction
   halfWidth: number; // half of total carriageway width
   oneway: boolean;
+  /** Route-cost multiplier for cyclists: bike lanes and cycleways are preferred, busy roads avoided. */
+  bikeCost: number;
 }
 
 const CAR_KINDS = new Set<RoadKind>(['highway', 'primary', 'secondary', 'tertiary', 'residential', 'service']);
@@ -75,7 +77,7 @@ export class RoadGraph {
   nodes: GNode[] = [];
   edges: GEdge[] = [];
   index = new Map<string, number>();
-  private grids: Record<Mode, Map<string, number[]>> = { car: new Map(), walk: new Map() };
+  private grids: Record<'car' | 'walk', Map<string, number[]>> = { car: new Map(), walk: new Map() };
   private static CELL = 60;
 
   static build(roads: Road[]): RoadGraph {
@@ -87,6 +89,7 @@ export class RoadGraph {
       const speed = r.maxspeedKmh / 3.6;
       const dirLanes = r.oneway ? r.lanes : Math.max(1, Math.floor(r.lanes / 2));
       const halfWidth = roadWidth(r) / 2;
+      const bikeCost = r.kind === 'cycleway' ? 0.7 : r.bikeLane ? 0.8 : r.kind === 'footway' ? 1.4 : r.kind === 'primary' || r.kind === 'secondary' ? 1.5 : 1;
       for (let i = 0; i < r.points.length; i++) {
         if (!g.index.has(r.nodes[i])) {
           g.index.set(r.nodes[i], g.nodes.length);
@@ -98,11 +101,11 @@ export class RoadGraph {
         const b = g.index.get(r.nodes[i])!;
         const len = dist(g.nodes[a].p, g.nodes[b].p);
         if (len < 0.01) continue;
-        g.addEdge({ from: a, to: b, len, speed, car, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway });
-        g.addEdge({ from: b, to: a, len, speed, car: car && !r.oneway, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway });
+        g.addEdge({ from: a, to: b, len, speed, car, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost });
+        g.addEdge({ from: b, to: a, len, speed, car: car && !r.oneway, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost });
       }
     }
-    for (const mode of ['car', 'walk'] as Mode[]) {
+    for (const mode of ['car', 'walk'] as const) {
       // Only snap to the largest connected network, so trips never start on an isolated fragment
       // (which would make every route from it fail after an expensive search).
       const main = g.largestComponent(mode);
@@ -118,7 +121,7 @@ export class RoadGraph {
   }
 
   /** Largest weakly connected set of nodes usable by a mode. */
-  largestComponent(mode: Mode): Set<number> {
+  largestComponent(mode: 'car' | 'walk'): Set<number> {
     const adj = new Map<number, number[]>();
     for (const e of this.edges) {
       if (!e[mode]) continue;
@@ -158,7 +161,7 @@ export class RoadGraph {
     return `${Math.floor(p[0] / RoadGraph.CELL) + dx},${Math.floor(p[1] / RoadGraph.CELL) + dy}`;
   }
 
-  nearestNode(p: Vec2, mode: Mode, maxRings = 6): number {
+  nearestNode(p: Vec2, mode: 'car' | 'walk', maxRings = 6): number {
     let best = -1;
     let bestD = Infinity;
     for (let ring = 0; ring <= maxRings; ring++) {
@@ -184,7 +187,8 @@ export class RoadGraph {
     if (from < 0 || to < 0) return null;
     if (from === to) return [];
     const target = this.nodes[to].p;
-    const vmax = mode === 'car' ? 35 : 1;
+    const vmax = mode === 'car' ? 35 : mode === 'bike' ? 1 / 0.7 : 1;
+    const allowed = mode === 'car' ? 'car' : 'walk';
     const cost = new Map<number, number>([[from, 0]]);
     const via = new Map<number, number>();
     const heap = new Heap();
@@ -206,8 +210,8 @@ export class RoadGraph {
       const c = cost.get(n)!;
       for (const ei of this.nodes[n].out) {
         const e = this.edges[ei];
-        if (!e[mode]) continue;
-        const nc = c + (mode === 'car' ? e.len / e.speed : e.len);
+        if (!e[allowed]) continue;
+        const nc = c + (mode === 'car' ? e.len / e.speed : mode === 'bike' ? e.len * e.bikeCost : e.len);
         if (nc < (cost.get(e.to) ?? Infinity)) {
           cost.set(e.to, nc);
           via.set(e.to, ei);

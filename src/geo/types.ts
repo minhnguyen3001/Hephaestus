@@ -58,6 +58,7 @@ export interface Road {
   name?: string;
   bridge?: boolean;
   tunnel?: boolean;
+  bikeLane?: boolean;
   origin: Origin;
 }
 
