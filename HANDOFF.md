@@ -1,5 +1,7 @@
 # HANDOFF: read this first
 
+**Live:** https://minhnguyen3001.github.io/Hephaestus/. It deploys automatically from `main` with `.github/workflows/pages.yml`; the first successful deploy was on 2026-11-17.
+
 Last updated: 2026-11-17 (session 1, later). The owner runs this project autonomously: **zero cost**, **GitHub on autopilot** (commit, push and merge to `main` without asking), keep working through TODO.md.
 
 ## New-session procedure
