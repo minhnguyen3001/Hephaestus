@@ -190,6 +190,7 @@ export function SimBar({
       <select value={day} onChange={(e) => onDay(e.target.value as DayType)} aria-label="Day type" className="hide-sm">
         <option value="weekday">Weekday</option>
         <option value="weekend">Weekend</option>
+        <option value="holiday">Public holiday</option>
       </select>
       <select value={weather} onChange={(e) => onWeather(e.target.value as Weather)} aria-label="Weather" className="hide-sm">
         <option value="clear">☀ Clear</option>

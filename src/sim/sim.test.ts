@@ -138,6 +138,7 @@ describe('simulation', () => {
     expect(demandAt(3)).toBeLessThan(0.2);
     expect(demandAt(8.2, 'weekend')).toBeLessThan(demandAt(14.5, 'weekend'));
     expect(demandAt(8.2, 'weekend')).toBeLessThan(demandAt(8.2));
+    expect(demandAt(14.5, 'holiday')).toBeLessThan(demandAt(14.5, 'weekend'));
   });
 
   it('scales demand for timeline projections', () => {

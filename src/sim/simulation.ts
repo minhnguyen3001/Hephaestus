@@ -224,7 +224,7 @@ const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus' | 'emergen
 };
 const isVehicle = (k: AgentKind) => k !== 'pedestrian' && k !== 'bicycle';
 
-export type DayType = 'weekday' | 'weekend';
+export type DayType = 'weekday' | 'weekend' | 'holiday';
 export type Weather = 'clear' | 'rain' | 'snow' | 'fog';
 
 /** A one-off crowd: attendees arrive over the 90 minutes before `start` and leave 2–3 hours after it. */
@@ -248,6 +248,7 @@ const WEATHER_SPEED: Record<Weather, number> = { clear: 1, rain: 0.85, snow: 0.6
 export function demandAt(hour: number, day: DayType = 'weekday'): number {
   const g = (mu: number, w: number) => Math.exp(-((hour - mu) ** 2) / (2 * w * w));
   if (day === 'weekend') return Math.min(1, (hour < 6 ? 0.07 : 0.1) + 0.68 * g(14.5, 3.2) + 0.15 * g(21, 1.5));
+  if (day === 'holiday') return Math.min(1, (hour < 7 ? 0.05 : 0.08) + 0.5 * g(15, 3.5) + 0.2 * g(20.5, 1.5));
   const night = hour < 5 ? 0.06 : 0.14;
   return Math.min(1, night + 0.86 * Math.max(g(8.2, 1.1), g(17.6, 1.3)) + 0.4 * g(13, 2.4));
 }
@@ -693,8 +694,8 @@ export class Simulation {
     const s = this.samplers;
     const pick = (k: keyof typeof s) => s[k].sample(this.rand());
     if (h >= 9 && h < 18 && r < (this.day === 'weekend' ? 0.03 : 0.07)) return { purpose: 'delivery', o: pick('freight'), d: pick('attract') };
-    if (this.day === 'weekend') {
-      if (r < 0.12) return { purpose: 'commute', o: pick('residents'), d: pick('jobs') };
+    if (this.day !== 'weekday') {
+      if (r < (this.day === 'holiday' ? 0.04 : 0.12)) return { purpose: 'commute', o: pick('residents'), d: pick('jobs') };
     } else if (h >= 5 && h < 10.5) {
       if (r < 0.68) return { purpose: 'commute', o: pick('residents'), d: pick('jobs') };
       if (r < 0.82 && s.school.total > 0) return { purpose: 'school', o: pick('residents'), d: pick('school') };
