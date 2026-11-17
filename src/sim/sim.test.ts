@@ -216,6 +216,17 @@ describe('simulation', () => {
     expect(sim.trainCars().some((c) => c.color === 0x8e44ad)).toBe(true);
   });
 
+  it('dispatches emergency vehicles from hospitals and civic buildings', () => {
+    const w = gridFixture();
+    w.buildings[0] = { ...w.buildings[0], use: 'health', name: 'General Hospital' };
+    const sim = new Simulation(w, profileFor('us'), 300, 9);
+    sim.step(10);
+    const em = sim.agents.filter((a) => a.kind === 'emergency');
+    expect(em.length).toBe(1);
+    expect(em[0].from).toBe('General Hospital');
+    expect(sim.stats().active.emergency).toBe(1);
+  });
+
   it('stops cars at red lights', () => {
     const w = gridFixture();
     const sim = new Simulation(w, profileFor('us'), 10, 3);

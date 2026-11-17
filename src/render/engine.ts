@@ -96,6 +96,7 @@ const PALETTES: Record<string, number[]> = {
   truck: [0xf2f2f2, 0x8c6e4a, 0x3d6e9e, 0xd35400],
   bicycle: [0x1abc9c, 0xe67e22, 0x34495e, 0xe74c3c],
   pedestrian: [0x34495e, 0xc0392b, 0x2980b9, 0x27ae60, 0x8e44ad, 0xf39c12, 0x7f8c8d, 0xecf0f1, 0x16a085],
+  emergency: [0xf4f4f4, 0xf4f4f4, 0xd8342c],
 };
 const MAX_INSTANCES = 1100;
 const UNDER = 14; // tunnel depth below ground, meters
@@ -120,6 +121,7 @@ export class Engine implements WorldRenderer {
   private agentMeshes = {} as Record<AgentKind, THREE.InstancedMesh>;
   private agentSlots = {} as Record<AgentKind, AgentView[]>;
   private trainMesh: THREE.InstancedMesh;
+  private lightbars: THREE.InstancedMesh;
   private highlight?: THREE.Object3D;
   private roadPreview?: THREE.Line;
   private night = { value: 0 };
@@ -258,6 +260,11 @@ export class Engine implements WorldRenderer {
       this.agentSlots[k] = [];
       this.scene.add(m);
     }
+    this.lightbars = new THREE.InstancedMesh(agentGeometry('lightbar'), new THREE.MeshBasicMaterial(), 64);
+    this.lightbars.setColorAt(0, new THREE.Color());
+    this.lightbars.count = 0;
+    this.lightbars.frustumCulled = false;
+    this.scene.add(this.lightbars);
     this.trainMesh = new THREE.InstancedMesh(agentGeometry('train'), new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.5 }), 200);
     this.trainMesh.setColorAt(0, new THREE.Color());
     this.trainMesh.count = 0;
@@ -875,6 +882,18 @@ export class Engine implements WorldRenderer {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+    // flashing light bars on emergency vehicles
+    const em = this.agentSlots.emergency;
+    const flash = Math.floor(performance.now() / 250) % 2;
+    em.slice(0, 64).forEach((a, i) => {
+      this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, this.deckH(a.x, a.y) + lift, -a.y);
+      this.lightbars.setMatrixAt(i, this.tmpM);
+      this.lightbars.setColorAt(i, this.tmpC.setHex((i + flash) % 2 ? 0xff2020 : 0x2060ff));
+    });
+    this.lightbars.count = Math.min(64, em.length);
+    this.lightbars.instanceMatrix.needsUpdate = true;
+    if (this.lightbars.instanceColor) this.lightbars.instanceColor.needsUpdate = true;
+
     const cars = sim.trains;
     const s = new THREE.Vector3();
     let ti = 0;

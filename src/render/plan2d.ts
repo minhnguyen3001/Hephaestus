@@ -12,7 +12,7 @@ import { PRESETS } from './quality';
 import { pickMode, ToolController, type Hit, type Tool, type ZoneOptions } from './tools';
 
 const AGENT_SIZE: Record<string, [number, number]> = {
-  pedestrian: [0.7, 0.7], bicycle: [0.6, 1.8], motorcycle: [0.8, 2.1], car: [1.9, 4.6], taxi: [1.9, 4.8], truck: [2.5, 9], bus: [2.6, 12],
+  pedestrian: [0.7, 0.7], bicycle: [0.6, 1.8], motorcycle: [0.8, 2.1], car: [1.9, 4.6], taxi: [1.9, 4.8], truck: [2.5, 9], bus: [2.6, 12], emergency: [2.1, 5.6],
 };
 
 function shade(n: number, f: number) {
@@ -510,7 +510,7 @@ export class Plan2D implements WorldRenderer {
     const sim = this.sim!;
     for (const a of sim.agents) {
       const [wd, ln] = AGENT_SIZE[a.kind];
-      const color = a.id === this.followId ? 0x00e5ff : a.kind === 'taxi' ? this.region!.taxiColor : a.kind === 'bus' ? this.region!.busColor : AGENT_COLORS[a.kind];
+      const color = a.id === this.followId ? 0x00e5ff : a.kind === 'emergency' ? (Math.floor(performance.now() / 250) % 2 ? 0xff2020 : 0x2060ff) : a.kind === 'taxi' ? this.region!.taxiColor : a.kind === 'bus' ? this.region!.busColor : AGENT_COLORS[a.kind];
       ctx.fillStyle = hex(color);
       if (a.kind === 'pedestrian') {
         const r = Math.max(0.5, 1.6 * px);

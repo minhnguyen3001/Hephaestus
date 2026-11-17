@@ -15,7 +15,7 @@ const HEIGHT_SOURCE: Record<string, [string, string]> = {
   user: ['Your change', 'Set in this proposal'],
 };
 const KIND_LABEL: Record<string, string> = {
-  pedestrian: 'Pedestrians', bicycle: 'Cyclists', motorcycle: 'Motorbikes', car: 'Cars', taxi: 'Taxis', truck: 'Trucks', bus: 'Buses',
+  pedestrian: 'Pedestrians', bicycle: 'Cyclists', motorcycle: 'Motorbikes', car: 'Cars', taxi: 'Taxis', truck: 'Trucks', bus: 'Buses', emergency: 'Emergency',
 };
 export const fmt = (n: number) => (Math.abs(n) >= 10000 ? `${(n / 1000).toFixed(1)}k` : Math.round(n).toLocaleString());
 

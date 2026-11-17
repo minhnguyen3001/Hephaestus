@@ -272,6 +272,10 @@ export function agentGeometry(kind: string): THREE.BufferGeometry {
       return mergeGeometries([box(2.55, 2.7, 12, 0.35), box(2.3, 0.25, 9, 3.05)])!;
     case 'train':
       return mergeGeometries([box(3, 3.4, 1, 0.5), box(2.6, 0.3, 0.8, 3.9)])!;
+    case 'emergency':
+      return mergeGeometries([box(2.1, 1.9, 5.6, 0.35), box(1.9, 0.6, 1.6, 0.6, 2.6)])!;
+    case 'lightbar':
+      return box(1.4, 0.25, 0.45, 2.25, 0.4);
     case 'pillar':
       return box(1.2, 1, 1.2, 0);
     case 'tree': {

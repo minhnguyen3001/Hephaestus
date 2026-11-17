@@ -5,9 +5,9 @@ import type { RegionProfile, TravelMode } from './region';
 
 const CYCLE = 64;
 
-export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus';
-export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus'];
-export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service';
+export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus' | 'emergency';
+export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus', 'emergency'];
+export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service' | 'emergency call';
 
 export interface Agent {
   id: number;
@@ -37,6 +37,7 @@ export interface Agent {
 
 interface Site {
   label: string;
+  station?: boolean; // hospital / civic building that dispatches emergency vehicles
   c: Vec2;
   residents: number;
   jobs: number;
@@ -193,7 +194,8 @@ export interface AgentInfo {
   cap?: number;
 }
 
-const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus', { len: number; vmax: number; acc: number }> = {
+const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus' | 'emergency', { len: number; vmax: number; acc: number }> = {
+  emergency: { len: 6, vmax: 1.35, acc: 3.2 },
   car: { len: 4.6, vmax: 1, acc: 2.5 },
   taxi: { len: 4.8, vmax: 1.05, acc: 2.6 },
   motorcycle: { len: 2.1, vmax: 1.05, acc: 3.5 },
@@ -276,7 +278,7 @@ export class Simulation {
     for (const b of world.buildings) {
       const cap = buildingCapacity(b);
       const c = centroid(b.footprint);
-      this.sites.push({ label: b.name ?? `${b.use} building`, c, ...cap, carNode: -1, walkNode: -1 });
+      this.sites.push({ label: b.name ?? `${b.use} building`, c, ...cap, carNode: -1, walkNode: -1, station: b.use === 'health' || b.use === 'civic' });
     }
     for (const a of world.areas) {
       if (a.kind !== 'park') continue;
@@ -696,6 +698,7 @@ export class Simulation {
     // While warming up, spawn in bounded batches (placed mid-trip) so no single tick stalls.
     for (let tries = 0; movers < target && tries < (this.filled ? 6 : 60); tries++) if (this.spawnTrip()) movers++;
     if (movers >= target * 0.9) this.filled = true;
+    this.dispatchEmergency(dt);
 
     // Group vehicles by (edge, lane) for car-following.
     const lanes = new Map<number, Agent[]>();
@@ -759,7 +762,10 @@ export class Simulation {
     const toEnd = e.len - a.s;
     // Red (or late yellow) light: the stop line acts as a stationary leader.
     const sig = this.signalState(e);
-    if (sig === 'red' || (sig === 'yellow' && toEnd > a.v * 1.5)) gap = Math.min(gap, toEnd - 1);
+    if (a.kind === 'emergency') {
+      // Emergency vehicles proceed through red with caution instead of stopping.
+      if (sig !== 'green' && toEnd < 25) gap = Math.min(gap, toEnd + 6);
+    } else if (sig === 'red' || (sig === 'yellow' && toEnd > a.v * 1.5)) gap = Math.min(gap, toEnd - 1);
     // Spill-back: respect the queue on the next edge.
     const next = a.path[a.pi + 1];
     if (next !== undefined && gap === Infinity) {
@@ -777,7 +783,7 @@ export class Simulation {
     a.v = Math.max(0, Math.min(vTarget, a.v + spec.acc * dt));
     a.s += a.v * dt;
     a.stopped = a.v < 0.1 ? a.stopped + dt : 0;
-    if (a.stopped > 150 && !a.bus) {
+    if (a.stopped > (a.kind === 'emergency' ? 60 : 150) && !a.bus) {
       // Gridlock recovery: give up rather than freeze the network forever.
       this.rerouted++;
       a.done = true;
@@ -807,6 +813,26 @@ export class Simulation {
         } else this.arrive(a);
       }
     }
+  }
+
+  private emergencyT = 5;
+  /** Occasionally send an emergency vehicle from a hospital or civic station to a random call. */
+  private dispatchEmergency(dt: number) {
+    this.emergencyT -= dt;
+    if (this.emergencyT > 0) return;
+    this.emergencyT = 60 + this.rand() * 120;
+    const active = this.agents.filter((a) => a.kind === 'emergency').length;
+    if (active >= Math.max(1, Math.round(this.maxAgents / 250))) return;
+    const stations = this.sites.filter((s) => s.station && s.carNode >= 0);
+    const o = stations[Math.floor(this.rand() * stations.length)];
+    const d = this.samplers.any.sample(this.rand());
+    if (!o || !d || d.carNode < 0) return;
+    const path = this.graph.route(o.carNode, d.carNode, 'car');
+    if (!path?.length) return;
+    const a = this.newAgent('emergency', 'emergency call', path);
+    a.from = o.label;
+    a.to = d.label;
+    this.agents.push(a);
   }
 
   private arrive(a: Agent) {
