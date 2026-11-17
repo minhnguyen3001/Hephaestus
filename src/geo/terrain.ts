@@ -116,7 +116,8 @@ export async function fetchTerrain(center: LatLon, radius: number, signal?: Abor
       const b = px(img, i, j + 1) * (1 - fx) + px(img, i + 1, j + 1) * fx;
       return a * (1 - fy) + b * fy;
     };
-    const t = buildTerrain(center, extent, 161, elevationAt);
+    // ~15 m grid spacing, more samples as the loaded city grows (capped for memory)
+    const t = buildTerrain(center, extent, Math.min(361, Math.max(161, Math.ceil((2 * extent) / 15) + 1)), elevationAt);
     // Treat sub-meter noise as flat so flat cities stay perfectly flat.
     return t.max - t.min < 1 ? undefined : t;
   } catch (e) {

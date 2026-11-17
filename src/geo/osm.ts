@@ -1,5 +1,5 @@
 import type { Area, Building, Vec2, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
-import { clipPolygon, coastlineWater, isClosed, joinWays } from './polygons';
+import { clipPolygonRect, coastlineWater, isClosed, joinWays } from './polygons';
 import { hash01, makeProjection, pointInPolygon, signedArea } from './util';
 
 /**
@@ -15,11 +15,24 @@ export const OVERPASS_MIRRORS = [
 ];
 
 /** 'core' = what the city needs to be playable; 'extras' = water/parks/coastline, loaded afterwards. */
-export type QueryPart = 'core' | 'extras' | 'stations';
+export type QueryPart = 'core' | 'extras' | 'stations' | 'all';
 
-export function buildOverpassQuery(c: LatLon, radius: number, part: QueryPart = 'core'): string {
+/** Local-metre rectangle a parse is limited to (a map tile). */
+export interface Bounds {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export function buildOverpassQuery(c: LatLon, radius: number, part: QueryPart = 'core', bbox?: [number, number, number, number]): string {
   const ll = `${c.lat.toFixed(6)},${c.lon.toFixed(6)}`;
-  const a = `(around:${Math.round(radius)},${ll})`;
+  const f = (v: number) => v.toFixed(6);
+  const a = bbox ? `(${bbox.map(f).join(',')})` : `(around:${Math.round(radius)},${ll})`;
+  if (part === 'all') {
+    const body = (q: string) => q.slice(q.indexOf('(\n') + 2, q.lastIndexOf(');'));
+    return `[out:json][timeout:60];\n(\n${body(buildOverpassQuery(c, radius, 'core', bbox))}${body(buildOverpassQuery(c, radius, 'extras', bbox))}${body(buildOverpassQuery(c, radius, 'stations', bbox))});\nout geom;`;
+  }
   if (part === 'stations') {
     return `[out:json][timeout:25];
 (
@@ -46,7 +59,7 @@ out geom;`;
   way["landuse"~"^(reservoir|basin|grass|forest|recreation_ground|meadow|village_green)$"]${a};
   way["leisure"~"^(park|garden|pitch|playground)$"]${a};
   way["natural"="wood"]${a};
-  way["natural"="coastline"](around:${Math.round(radius * 2)},${ll});
+  way["natural"="coastline"]${bbox ? `(${[bbox[0] - 0.01, bbox[1] - 0.01, bbox[2] + 0.01, bbox[3] + 0.01].map(f).join(',')})` : `(around:${Math.round(radius * 2)},${ll})`};
   node["natural"="tree"]${a};
   relation["type"="multipolygon"]["natural"~"^(water|wood)$"]${a}(if:count_members() < 500);
   relation["type"="multipolygon"]["waterway"="riverbank"]${a}(if:count_members() < 500);
@@ -157,7 +170,7 @@ function parseSpeed(v: string | undefined, kind: RoadKind): number {
   return v!.includes('mph') ? n * 1.609 : n;
 }
 
-export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, radius: number): WorldData {
+export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, radius: number, bounds?: Bounds, tag = ''): WorldData {
   const proj = makeProjection(center);
   const buildings: Building[] = [];
   const roads: Road[] = [];
@@ -167,13 +180,15 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   const trees: Vec2[] = [];
   const stations: { p: Vec2; name?: string }[] = [];
   const coast: Vec2[][] = [];
-  const E = radius * 1.3; // everything area-like is clipped to this square (matches the terrain extent)
+  const E = radius * 1.3; // without bounds, area-like features are clipped to this square (matches the terrain extent)
+  const B: Bounds = bounds ?? { x0: -E, y0: -E, x1: E, y1: E };
+  const inside = (p: Vec2) => (bounds ? p[0] >= B.x0 - 40 && p[0] <= B.x1 + 40 && p[1] >= B.y0 - 40 && p[1] <= B.y1 + 40 : p[0] * p[0] + p[1] * p[1] < (radius * 1.08) ** 2);
 
   const pushArea = (id: string, kind: 'water' | 'park', outer: Vec2[], holes: Vec2[][] = []) => {
-    const polygon = clipPolygon(outer, E);
+    const polygon = clipPolygonRect(outer, B.x0, B.y0, B.x1, B.y1);
     if (polygon.length < 3 || Math.abs(signedArea(polygon)) < 20) return;
-    const hs = holes.map((h) => clipPolygon(h, E)).filter((h) => h.length >= 3);
-    areas.push({ id, kind, polygon, holes: hs.length ? hs : undefined });
+    const hs = holes.map((h) => clipPolygonRect(h, B.x0, B.y0, B.x1, B.y1)).filter((h) => h.length >= 3);
+    areas.push({ id: id + tag, kind, polygon, holes: hs.length ? hs : undefined });
   };
   const areaKind = (tags: Record<string, string>): 'water' | 'park' | null => {
     if (tags.natural === 'water' || tags.waterway === 'riverbank' || ['reservoir', 'basin'].includes(tags.landuse)) return 'water';
@@ -213,7 +228,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
     if (el.type !== 'way' || !el.geometry || !el.nodes || el.geometry.length < 2) continue;
     const pts = el.geometry.map((g) => proj.toLocal(g.lat, g.lon));
     // Packs may cover more than requested: keep only features reaching into the requested circle.
-    const near = pts.some((p) => p[0] * p[0] + p[1] * p[1] < (radius * 1.08) ** 2);
+    const near = pts.some(inside);
     if (!near && (tags.building || tags.highway || tags.railway)) continue;
     const nodeIds = el.nodes.map((n) => `n${n}`);
     const closed = el.nodes.length >= 4 && el.nodes[0] === el.nodes[el.nodes.length - 1];
@@ -272,11 +287,16 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   }
 
   if (coast.length) {
-    const { water, islands } = coastlineWater(coast, E);
+    // coastlineWater works on a square centred at 0: shift into the tile's frame and back
+    const cx = (B.x0 + B.x1) / 2;
+    const cy = (B.y0 + B.y1) / 2;
+    const half = Math.max(B.x1 - B.x0, B.y1 - B.y0) / 2;
+    const shift = (l: Vec2[], s: number) => l.map(([x, y]) => [x + s * cx, y + s * cy] as Vec2);
+    const { water, islands } = coastlineWater(coast.map((l) => shift(l, -1)), half);
     // Sea first so lakes/parks/islands draw on top of it.
     areas.unshift(
-      ...water.map((polygon, k) => ({ id: `sea-${k}`, kind: 'water' as const, polygon, sea: true })),
-      ...islands.map((polygon, k) => ({ id: `island-${k}`, kind: 'land' as const, polygon })),
+      ...water.map((polygon, k) => ({ id: `sea-${k}${tag}`, kind: 'water' as const, polygon: shift(polygon, 1), sea: true })),
+      ...islands.map((polygon, k) => ({ id: `island-${k}${tag}`, kind: 'land' as const, polygon: shift(polygon, 1) })),
     );
   }
 
@@ -401,4 +421,19 @@ export async function fetchStations(center: LatLon, radius: number, signal?: Abo
   const pack = await loadPack(center, radius);
   if (pack?.stations) return parseOverpass({ elements: pack.stations }, center, radius).stations;
   return parseOverpass(await overpass(buildOverpassQuery(center, radius, 'stations'), signal), center, radius).stations;
+}
+
+export const TILE = 1000; // metres
+
+/** Local bounds of map tile (i, j); tile (0, 0) is centred on the project origin. */
+export const tileBounds = (i: number, j: number): Bounds => ({ x0: i * TILE - TILE / 2, y0: j * TILE - TILE / 2, x1: i * TILE + TILE / 2, y1: j * TILE + TILE / 2 });
+
+/** Everything for one 1 km tile in a single Overpass request (cached like other queries). */
+export async function fetchTile(center: LatLon, i: number, j: number, signal?: AbortSignal): Promise<WorldData> {
+  const proj = makeProjection(center);
+  const b = tileBounds(i, j);
+  const sw = proj.toLatLon([b.x0, b.y0]);
+  const ne = proj.toLatLon([b.x1, b.y1]);
+  const q = buildOverpassQuery(center, 0, 'all', [sw.lat, sw.lon, ne.lat, ne.lon]);
+  return parseOverpass(await overpass(q, signal), center, TILE, b, `@${i},${j}`);
 }

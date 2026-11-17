@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchAreas, fetchStations, fetchWorld } from '../geo/osm';
 import { fetchTerrain } from '../geo/terrain';
+import { loadedRadius, mergeWorld, TileStream } from '../geo/tiles';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
 import { encodePlan } from '../project/share';
@@ -8,8 +9,7 @@ import { saveProject, withScenarios, type Project, type Scenario } from '../proj
 import { Engine, type CameraMode, type Layers, type Perf, type Selection, type Tool, type WorldRenderer } from '../render/engine';
 import type { ZoneOptions } from '../render/tools';
 import { Plan2D } from '../render/plan2d';
-import type { QualitySetting } from '../render/quality';
-import { makeProjection } from '../geo/util';
+import { PRESETS, resolveQuality, type QualitySetting } from '../render/quality';
 import { profileFor } from '../sim/region';
 import type { CityEvent, DayType, SimStats, Weather } from '../sim/simulation';
 import type { Vec2 } from '../geo/types';
@@ -90,7 +90,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     }
   });
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
-  const [beyond, setBeyond] = useState<{ lat: number; lon: number } | null>(null);
+  const [tiles, setTiles] = useState<{ loaded: number; pending: number; budget: number } | null>(null);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [tour, setTour] = useState<TourSignals>({ cameraMoved: false, inspected: false, orbited: false, edited: false, compared: false, fast: false });
   const mark = useCallback((k: keyof TourSignals) => setTour((t) => (t[k] ? t : { ...t, [k]: true })), []);
@@ -301,21 +301,59 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     return () => clearInterval(t);
   }, [dashOpen, base]);
 
-  // Panning past the loaded area offers to load the city there (a new project centred on that spot).
+  // The city streams in as 1 km tiles around wherever the user looks (nearest first, within a budget).
+  const baseReady = !!base;
   useEffect(() => {
-    if (!base) return;
-    const proj = makeProjection({ lat: project.place.lat, lon: project.place.lon });
-    const t = setInterval(() => {
+    if (!baseReady) return;
+    const center = { lat: project.place.lat, lon: project.place.lon };
+    const incoming: WorldData[] = [];
+    const stream = new TileStream(
+      center,
+      PRESETS[resolveQuality(quality)].tiles,
+      (w) => incoming.push(w),
+      (loaded, pending, budget) => setTiles({ loaded, pending, budget }),
+    );
+    stream.seed(['0,0']); // the initial load already covers the centre tile
+    stream.want(0, 0, 1);
+    // Batch tile arrivals so the scene and simulation update every few seconds, not per tile.
+    const flush = setInterval(() => {
+      if (!incoming.length) return;
+      const batch = incoming.splice(0);
+      setBase((b) => {
+        if (!b) return b;
+        let m = b;
+        for (const w of batch) m = mergeWorld(m, w);
+        return { ...m, radius: loadedRadius(stream.loaded, b.radius) };
+      });
+    }, 2500);
+    const look = setInterval(() => {
       const v = engine.current?.getView();
       const c: [number, number] | undefined = v?.target ? [v.target[0], -v.target[2]] : v?.center;
-      if (!c) return;
-      if (Math.hypot(c[0], c[1]) > project.radius * 0.95) {
-        const ll = proj.toLatLon(c);
-        setBeyond((b) => (b && Math.abs(b.lat - ll.lat) < 1e-4 && Math.abs(b.lon - ll.lon) < 1e-4 ? b : ll));
-      } else setBeyond(null);
-    }, 1000);
-    return () => clearInterval(t);
-  }, [base, project.place.lat, project.place.lon, project.radius]);
+      if (c) stream.want(c[0], c[1], 1);
+    }, 1500);
+    return () => {
+      stream.dispose();
+      clearInterval(flush);
+      clearInterval(look);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseReady, project.place.lat, project.place.lon]);
+
+  // Terrain follows the loaded area: re-fetch (cached tiles, finer grid) when the city grows.
+  const radius = base?.radius;
+  useEffect(() => {
+    if (!radius || radius <= project.radius) return;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      fetchTerrain({ lat: project.place.lat, lon: project.place.lon }, radius, ctrl.signal)
+        .then((tr) => tr && setBase((b) => (b ? { ...b, terrain: tr } : b)))
+        .catch(() => undefined);
+    }, 3000);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [radius, project.place.lat, project.place.lon, project.radius]);
 
   // Tour progress comes from what the user actually does.
   useEffect(() => {
@@ -564,19 +602,12 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         </div>
       )}
 
-      {beyond && !hint && (
-        <button
-          className="panel beyond"
-          onClick={() => onOpenPlace({ name: `Near ${project.place.name}`, displayName: `${beyond.lat.toFixed(4)}, ${beyond.lon.toFixed(4)}`, lat: beyond.lat, lon: beyond.lon, countryCode: project.place.countryCode })}
-        >
-          You’re past the loaded area — <b>load the city here</b>
-        </button>
-      )}
 
       {hint && <div className="hint" role="status">{hint}<button className="icon-btn" onClick={() => setHint(null)} aria-label="Dismiss">✕</button></div>}
 
       <footer className="attribution">
         {base && <span className="hide-sm">{fmt(base.buildings.length)} buildings · {originalMetrics ? Math.round(originalMetrics.estimatedHeights * 100) : 0}% heights estimated · </span>}
+        {tiles && <span className="hide-sm">map {tiles.loaded}/{tiles.budget} km²{tiles.pending ? ` · loading ${tiles.pending}…` : ''} · </span>}
         {perf && <span className="hide-sm">{Math.round(perf.fps)} fps · {perf.frameMs.toFixed(1)} ms · {perf.quality} · </span>}
         Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
         {base?.terrain && <> · Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">AWS Terrain Tiles</a></>}

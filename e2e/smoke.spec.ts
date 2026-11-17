@@ -317,3 +317,19 @@ test('Amsterdam shows bike network and cyclists', async ({ page }) => {
   await page.waitForTimeout(4000);
   await page.screenshot({ path: 'test-results/24-amsterdam-2d.png' });
 });
+
+test('the city streams in tile by tile beyond the starting area', async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.quality', 'medium'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Chicago Loop/ }).click();
+  await expect(page.locator('.attribution')).toContainText('map 1/30', { timeout: 60_000 });
+  const count = async () => Number((/([\d,]+) buildings/.exec(await page.locator('.attribution').innerText())?.[1] ?? '0').replace(/,/g, ''));
+  const first = await count();
+  await expect.poll(count, { timeout: 240_000, intervals: [5000] }).toBeGreaterThan(first * 1.5);
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/25-tiles.png' });
+  console.log('TILES', first, '→', await count(), (await page.locator('.attribution').innerText()).slice(0, 90));
+});

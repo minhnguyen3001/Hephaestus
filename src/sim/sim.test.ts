@@ -413,6 +413,30 @@ describe('advisor', () => {
   });
 });
 
+describe('map tiles', () => {
+  it('merges tiles without duplicating features that cross tile edges', async () => {
+    const { mergeWorld, loadedRadius } = await import('../geo/tiles');
+    const a = gridFixture();
+    const b = { ...gridFixture(), buildings: [...gridFixture().buildings, { ...a.buildings[0], id: 'new-b' }] };
+    const m = mergeWorld(a, b);
+    expect(m.roads).toHaveLength(a.roads.length);
+    expect(m.buildings).toHaveLength(a.buildings.length + 1);
+    expect(loadedRadius(['0,0', '2,-1'], 850)).toBe(2500);
+  });
+
+  it('builds one combined bbox query per tile and parses within its bounds', async () => {
+    const { buildOverpassQuery, tileBounds } = await import('../geo/osm');
+    const q = buildOverpassQuery(C, 0, 'all', [41.87, -87.64, 41.88, -87.62]);
+    expect(q).toContain('way["building"](41.870000,-87.640000,41.880000,-87.620000)');
+    expect(q).toContain('node["railway"');
+    expect(q).toContain('way["natural"="water"]');
+    expect(q.match(/out geom;/g)).toHaveLength(1);
+    expect(tileBounds(1, -1)).toEqual({ x0: 500, y0: -1500, x1: 1500, y1: -500 });
+    const w = parseOverpass({ elements: [] } as never, C, 1000, tileBounds(0, 0), '@0,0');
+    expect(w.buildings).toEqual([]);
+  });
+});
+
 describe('trees', () => {
   it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
     const { treePoints } = await import('../geo/trees');

@@ -602,13 +602,15 @@ export class Engine implements WorldRenderer {
         ground.add(this.ground, disc, ring);
       }
       this.ground.userData.ground = true;
+      // shadows cover the area around the camera (the sun follows the target), not the whole city
+      const sr = Math.min(r * 1.1, 950);
       const sc = this.sun.shadow.camera;
-      sc.left = -r * 1.1;
-      sc.right = r * 1.1;
-      sc.top = r * 1.1;
-      sc.bottom = -r * 1.1;
+      sc.left = -sr;
+      sc.right = sr;
+      sc.top = sr;
+      sc.bottom = -sr;
       sc.near = 1;
-      sc.far = r * 6;
+      sc.far = sr * 8;
       sc.updateProjectionMatrix();
       const size = PRESETS[q].shadowSize;
       if (size && this.sun.shadow.mapSize.x !== size) {
@@ -997,6 +999,24 @@ export class Engine implements WorldRenderer {
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
 
+  private cullT = 0;
+  /** Hide building and road chunks far from the camera, so big cities stay light on low-end GPUs. */
+  private cullChunks(dt: number) {
+    this.cullT += dt;
+    if (this.cullT < 0.4) return;
+    this.cullT = 0;
+    const far = { low: 1800, medium: 3000, high: 4500 }[this.quality];
+    const cam = this.camera.position;
+    for (const store of [this.buildingChunks, this.roadChunks]) {
+      for (const c of store.values()) {
+        const g = c.pick.mesh.geometry;
+        if (!g.boundingSphere) g.computeBoundingSphere();
+        const bs = g.boundingSphere!;
+        c.pick.mesh.visible = cam.distanceTo(bs.center) - bs.radius < far;
+      }
+    }
+  }
+
   private updateTraffic(dt: number) {
     this.trafficT += dt;
     if (!this.layers.traffic || this.trafficT < 1 || !this.sim) return;
@@ -1067,6 +1087,7 @@ export class Engine implements WorldRenderer {
     this.updateAgents();
     this.updateSignals();
     this.updateTraffic(dt);
+    this.cullChunks(dt);
     this.updateWeather(dt);
     this.updateCamera(dt);
     this.controls.update();
@@ -1208,7 +1229,7 @@ export class Engine implements WorldRenderer {
     const dusk = Math.max(0, 1 - Math.abs(elev) / 0.25) * 0.8;
     const az = (h / 24) * Math.PI * 2;
     const el = Math.max(0.12, elev);
-    const r = (this.world?.radius ?? 600) * 2;
+    const r = Math.min(this.world?.radius ?? 600, 950) * 2;
     const t = this.controls.target;
     this.sun.position.set(t.x + Math.cos(az) * Math.cos(el) * r, Math.sin(el) * r, t.z + Math.sin(az) * Math.cos(el) * r);
     this.sun.target.position.set(t.x, 0, t.z);

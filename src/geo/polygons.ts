@@ -36,12 +36,17 @@ export const isClosed = (l: Vec2[]) => l.length >= 4 && key(l[0]) === key(l[l.le
 
 /** Sutherland–Hodgman clip of a polygon (open ring) to the square [-E, E]². */
 export function clipPolygon(poly: Vec2[], E: number): Vec2[] {
+  return clipPolygonRect(poly, -E, -E, E, E);
+}
+
+/** Sutherland–Hodgman clip of a polygon (open ring) to the rectangle [x0, x1] × [y0, y1]. */
+export function clipPolygonRect(poly: Vec2[], x0: number, y0: number, x1: number, y1: number): Vec2[] {
   let pts = poly;
   const edges: [(p: Vec2) => boolean, (a: Vec2, b: Vec2) => Vec2][] = [
-    [(p) => p[0] >= -E, (a, b) => lerpAt(a, b, 0, -E)],
-    [(p) => p[0] <= E, (a, b) => lerpAt(a, b, 0, E)],
-    [(p) => p[1] >= -E, (a, b) => lerpAt(a, b, 1, -E)],
-    [(p) => p[1] <= E, (a, b) => lerpAt(a, b, 1, E)],
+    [(p) => p[0] >= x0, (a, b) => lerpAt(a, b, 0, x0)],
+    [(p) => p[0] <= x1, (a, b) => lerpAt(a, b, 0, x1)],
+    [(p) => p[1] >= y0, (a, b) => lerpAt(a, b, 1, y0)],
+    [(p) => p[1] <= y1, (a, b) => lerpAt(a, b, 1, y1)],
   ];
   for (const [inside, cut] of edges) {
     if (!pts.length) break;
