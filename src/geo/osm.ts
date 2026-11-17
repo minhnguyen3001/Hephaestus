@@ -337,12 +337,25 @@ const KEEP_TAGS = new Set([
 ]);
 const r6 = (g: { lat: number; lon: number }) => ({ lat: Math.round(g.lat * 1e6) / 1e6, lon: Math.round(g.lon * 1e6) / 1e6 });
 
+function slimNodes(e: OsmElement): number[] {
+  const n = e.nodes!;
+  const network = !!(e.tags?.highway || e.tags?.railway || e.tags?.natural === 'coastline');
+  const closed = n.length >= 4 && n[0] === n[n.length - 1];
+  return network || !closed ? n : closedStub(n.length, n[0]);
+}
+
+/** For closed non-network ways only closure matters: keep the length and the repeated first/last id. */
+function closedStub(n: number, first: number): number[] {
+  return Array.from({ length: n }, (_, k) => (k === 0 || k === n - 1 ? first : -k));
+}
+
 /** Drop unused tags and round coordinates to ~10 cm so packs stay small. */
 export function slimElements(elements: unknown[]): OsmElement[] {
   return (elements as OsmElement[]).map((e) => ({
     type: e.type,
     id: e.id,
-    ...(e.nodes ? { nodes: e.nodes } : {}),
+    // node ids only matter for network topology (roads, rail, coastline); other closed ways just need closure
+    ...(e.nodes ? { nodes: slimNodes(e) } : {}),
     ...(e.geometry ? { geometry: e.geometry.map(r6) } : {}),
     ...(e.lat !== undefined && e.lon !== undefined ? r6({ lat: e.lat, lon: e.lon }) : {}),
     ...(e.members ? { members: e.members.filter((m) => m.type === 'way').map((m) => ({ type: m.type, role: m.role, geometry: m.geometry?.map(r6) })) } : {}),
@@ -432,6 +445,13 @@ export const tileBounds = (i: number, j: number): Bounds => ({ x0: i * TILE - TI
 export async function fetchTile(center: LatLon, i: number, j: number, signal?: AbortSignal): Promise<WorldData> {
   const proj = makeProjection(center);
   const b = tileBounds(i, j);
+  // Pre-built tiles for featured cities are static files: instant, and no load on public servers.
+  try {
+    const r = await fetch(`${baseUrl()}tiles/${packFile(center).replace('.json', '')}/${i}_${j}.json`, { signal });
+    if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) return parseOverpass({ elements: await r.json() }, center, TILE, b, `@${i},${j}`);
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw e;
+  }
   const sw = proj.toLatLon([b.x0, b.y0]);
   const ne = proj.toLatLon([b.x1, b.y1]);
   const q = buildOverpassQuery(center, 0, 'all', [sw.lat, sw.lon, ne.lat, ne.lon]);
