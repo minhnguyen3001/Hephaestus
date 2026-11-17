@@ -249,3 +249,5 @@ select.scenario { max-width: 150px; }
 .dots i.now { background: rgba(63,211,195,0.5); }
 @media (max-width: 600px) { .tour { left: 8px; right: 8px; width: auto; top: 64px; } }
 @media (max-width: 600px) { .attribution { left: 8px; right: 8px; bottom: 1px; text-align: center; font-size: 10px; } }
+.beyond { left: 50%; transform: translateX(-50%); top: 112px; z-index: 8; padding: 8px 14px; font-size: 13px; color: var(--text); }
+.beyond b { color: var(--accent); }

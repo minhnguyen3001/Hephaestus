@@ -9,6 +9,7 @@ import { Engine, type CameraMode, type Layers, type Perf, type Selection, type T
 import type { ZoneOptions } from '../render/tools';
 import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
+import { makeProjection } from '../geo/util';
 import { profileFor } from '../sim/region';
 import type { DayType, SimStats } from '../sim/simulation';
 import { cityMetrics } from './metrics';
@@ -80,6 +81,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     }
   });
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
+  const [beyond, setBeyond] = useState<{ lat: number; lon: number } | null>(null);
   const [tour, setTour] = useState<TourSignals>({ cameraMoved: false, inspected: false, orbited: false, edited: false, compared: false, fast: false });
   const mark = useCallback((k: keyof TourSignals) => setTour((t) => (t[k] ? t : { ...t, [k]: true })), []);
 
@@ -255,6 +257,22 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }, []);
 
   const setCam = (m: CameraMode) => engine.current?.setCameraMode(m);
+
+  // Panning past the loaded area offers to load the city there (a new project centred on that spot).
+  useEffect(() => {
+    if (!base) return;
+    const proj = makeProjection({ lat: project.place.lat, lon: project.place.lon });
+    const t = setInterval(() => {
+      const v = engine.current?.getView();
+      const c: [number, number] | undefined = v?.target ? [v.target[0], -v.target[2]] : v?.center;
+      if (!c) return;
+      if (Math.hypot(c[0], c[1]) > project.radius * 0.95) {
+        const ll = proj.toLatLon(c);
+        setBeyond((b) => (b && Math.abs(b.lat - ll.lat) < 1e-4 && Math.abs(b.lon - ll.lon) < 1e-4 ? b : ll));
+      } else setBeyond(null);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [base, project.place.lat, project.place.lon, project.radius]);
 
   // Tour progress comes from what the user actually does.
   useEffect(() => {
@@ -491,6 +509,15 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           <button className="primary" onClick={() => engine.current?.finishDraft()}>Finish zone</button>
           <button className="ghost" onClick={() => setTool('select')}>Done</button>
         </div>
+      )}
+
+      {beyond && !hint && (
+        <button
+          className="panel beyond"
+          onClick={() => onOpenPlace({ name: `Near ${project.place.name}`, displayName: `${beyond.lat.toFixed(4)}, ${beyond.lon.toFixed(4)}`, lat: beyond.lat, lon: beyond.lon, countryCode: project.place.countryCode })}
+        >
+          You’re past the loaded area — <b>load the city here</b>
+        </button>
       )}
 
       {hint && <div className="hint" role="status">{hint}<button className="icon-btn" onClick={() => setHint(null)} aria-label="Dismiss">✕</button></div>}

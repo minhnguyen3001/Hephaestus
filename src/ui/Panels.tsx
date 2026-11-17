@@ -107,6 +107,24 @@ function BuildingInspector({ b, editable, onEdit, onFocus }: { b: Building; edit
       </dl>
       <div className="row">
         <button onClick={onFocus}>Orbit 360°</button>
+        {editable && (
+          <button
+            onClick={() => {
+              const xs = b.footprint.map((p) => p[0]);
+              const dx = Math.max(...xs) - Math.min(...xs) + 8;
+              onEdit({
+                kind: 'addBuilding',
+                building: {
+                  ...b, id: `u-b-${Date.now().toString(36)}`, footprint: b.footprint.map(([x, y]) => [x + dx, y] as [number, number]),
+                  origin: 'proposed', heightSource: 'user', useSource: 'user', name: `${b.name ?? 'Building'} (copy)`,
+                },
+              });
+            }}
+            title="Place a copy next to this building"
+          >
+            Duplicate
+          </button>
+        )}
         {editable && <button className="danger" onClick={() => onEdit({ kind: 'demolish', id: b.id })}>Demolish</button>}
       </div>
       {!editable && <p className="note">Switch to <strong>Proposed</strong> to edit.</p>}

@@ -169,6 +169,44 @@ export class Engine implements WorldRenderer {
   /** Ground height (m) at local x, y. */
   private h = (x: number, y: number) => sampleTerrain(this.world?.terrain, x, y);
   private hp = (p: Vec2) => this.h(p[0], p[1]);
+  /** Bridge decks: straight between abutments. Grid of segments so agents can sit on decks too. */
+  private decks = new Map<string, { a: Vec2; b: Vec2; ha: number; hb: number; hw: number }[]>();
+  private deckH = (x: number, y: number): number => {
+    const ground = this.h(x, y);
+    const list = this.decks.get(`${Math.floor(x / 50)},${Math.floor(y / 50)}`);
+    if (!list) return ground;
+    for (const d of list) {
+      const dx = d.b[0] - d.a[0];
+      const dy = d.b[1] - d.a[1];
+      const t = Math.max(0, Math.min(1, ((x - d.a[0]) * dx + (y - d.a[1]) * dy) / (dx * dx + dy * dy || 1)));
+      if (Math.hypot(x - d.a[0] - t * dx, y - d.a[1] - t * dy) < d.hw) return Math.max(ground, d.ha + (d.hb - d.ha) * t);
+    }
+    return ground;
+  };
+
+  private buildDecks(w: WorldData) {
+    this.decks.clear();
+    if (!w.terrain) return;
+    for (const r of w.roads) {
+      if (!r.bridge || r.tunnel) continue;
+      // straight deck between the first and last point, measured along the road
+      const ha = this.hp(r.points[0]);
+      const hb = this.hp(r.points[r.points.length - 1]);
+      let total = 0;
+      const cum = [0];
+      for (let i = 1; i < r.points.length; i++) cum.push((total += dist(r.points[i - 1], r.points[i])));
+      for (let i = 1; i < r.points.length; i++) {
+        const seg = { a: r.points[i - 1], b: r.points[i], ha: ha + ((hb - ha) * cum[i - 1]) / (total || 1), hb: ha + ((hb - ha) * cum[i]) / (total || 1), hw: roadWidth(r) / 2 + 1.5 };
+        const [x0, x1] = [Math.min(seg.a[0], seg.b[0]) - seg.hw, Math.max(seg.a[0], seg.b[0]) + seg.hw];
+        const [y0, y1] = [Math.min(seg.a[1], seg.b[1]) - seg.hw, Math.max(seg.a[1], seg.b[1]) + seg.hw];
+        for (let cx = Math.floor(x0 / 50); cx <= Math.floor(x1 / 50); cx++)
+          for (let cy = Math.floor(y0 / 50); cy <= Math.floor(y1 / 50); cy++) {
+            const k = `${cx},${cy}`;
+            (this.decks.get(k) ?? this.decks.set(k, []).get(k)!).push(seg);
+          }
+      }
+    }
+  }
   /** Extra clearance for draped layers when the ground is not flat (terrain mesh is coarser than the sampler). */
   private get lift() {
     return this.world?.terrain ? 0.3 : 0;
@@ -407,6 +445,7 @@ export class Engine implements WorldRenderer {
 
     const t = w.terrain;
     const lift = this.lift;
+    this.buildDecks(w);
     if (t) {
       // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
       const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, t.n - 1, t.n - 1).rotateX(-Math.PI / 2);
@@ -456,10 +495,11 @@ export class Engine implements WorldRenderer {
       if (road.tunnel) continue;
       const color = new THREE.Color(ROAD_COLORS[road.kind]);
       if (road.origin === 'proposed') color.lerp(new THREE.Color(0x3fd3c3), 0.45);
-      const g = ribbonGeometry(road.points, roadWidth(road), (p) => this.hp(p) + lift + ROAD_Y[road.kind], color);
+      const ground = road.bridge ? (p: Vec2) => this.deckH(p[0], p[1]) : this.hp;
+      const g = ribbonGeometry(road.points, roadWidth(road), (p) => ground(p) + lift + ROAD_Y[road.kind], color);
       if (g) roadItems.push({ id: road.id, geom: g });
       if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
-        const c = ribbonGeometry(road.points, 0.18, (p) => this.hp(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
+        const c = ribbonGeometry(road.points, 0.18, (p) => ground(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
         if (c) roadItems.push({ id: `${road.id}#m`, geom: c });
       }
     }
@@ -827,7 +867,7 @@ export class Engine implements WorldRenderer {
       const palette = k === 'taxi' ? [this.region!.taxiColor] : k === 'bus' ? [this.region!.busColor] : PALETTES[k];
       for (let i = 0; i < slots.length; i++) {
         const a = slots[i];
-        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, this.h(a.x, a.y) + lift, -a.y);
+        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, this.deckH(a.x, a.y) + lift, -a.y);
         mesh.setMatrixAt(i, this.tmpM);
         mesh.setColorAt(i, this.tmpC.setHex(a.id === this.followId ? 0x00e5ff : palette[a.id % palette.length]));
       }
