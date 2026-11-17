@@ -1,5 +1,6 @@
-import type { Area, Building, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
-import { hash01, makeProjection, signedArea } from './util';
+import type { Area, Building, Vec2, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
+import { clipPolygon, coastlineWater, isClosed, joinWays } from './polygons';
+import { hash01, makeProjection, pointInPolygon, signedArea } from './util';
 
 /**
  * OpenStreetMap provider (via Overpass API). Data © OpenStreetMap contributors, ODbL.
@@ -8,23 +9,40 @@ import { hash01, makeProjection, signedArea } from './util';
  */
 export const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 
-export function buildOverpassQuery(c: LatLon, radius: number): string {
-  const a = `(around:${Math.round(radius)},${c.lat.toFixed(6)},${c.lon.toFixed(6)})`;
-  return `[out:json][timeout:40];
+/** 'core' = what the city needs to be playable; 'extras' = water/parks/coastline, loaded afterwards. */
+export type QueryPart = 'core' | 'extras';
+
+export function buildOverpassQuery(c: LatLon, radius: number, part: QueryPart = 'core'): string {
+  const ll = `${c.lat.toFixed(6)},${c.lon.toFixed(6)}`;
+  const a = `(around:${Math.round(radius)},${ll})`;
+  if (part === 'core') {
+    return `[out:json][timeout:30];
 (
   way["building"]${a};
   way["highway"]${a};
+  way["railway"~"^(rail|subway|tram|light_rail)$"]${a};
+  relation["type"="multipolygon"]["building"]${a}(if:count_members() < 200);
+  node["highway"="traffic_signals"]${a};
+);
+out geom;`;
+  }
+  return `[out:json][timeout:30];
+(
   way["natural"="water"]${a};
   way["waterway"="riverbank"]${a};
   way["landuse"~"^(reservoir|basin|grass|forest|recreation_ground|meadow|village_green)$"]${a};
   way["leisure"~"^(park|garden|pitch|playground)$"]${a};
   way["natural"="wood"]${a};
-  way["railway"~"^(rail|subway|tram|light_rail)$"]${a};
-  node["highway"="traffic_signals"]${a};
+  way["natural"="coastline"](around:${Math.round(radius * 2)},${ll});
+  relation["type"="multipolygon"]["natural"~"^(water|wood)$"]${a}(if:count_members() < 500);
+  relation["type"="multipolygon"]["waterway"="riverbank"]${a}(if:count_members() < 500);
+  relation["type"="multipolygon"]["leisure"~"^(park|garden)$"]${a}(if:count_members() < 500);
+  relation["type"="multipolygon"]["landuse"~"^(grass|forest|recreation_ground|reservoir|basin)$"]${a}(if:count_members() < 500);
 );
 out geom;`;
 }
@@ -32,6 +50,7 @@ out geom;`;
 interface OsmElement {
   type: 'way' | 'node' | 'relation';
   id: number;
+  members?: { type: string; role: string; geometry?: { lat: number; lon: number }[] }[];
   nodes?: number[];
   geometry?: { lat: number; lon: number }[];
   tags?: Record<string, string>;
@@ -134,6 +153,20 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   const areas: Area[] = [];
   const rails: Rail[] = [];
   const signalNodes: string[] = [];
+  const coast: Vec2[][] = [];
+  const E = radius * 1.3; // everything area-like is clipped to this square (matches the terrain extent)
+
+  const pushArea = (id: string, kind: 'water' | 'park', outer: Vec2[], holes: Vec2[][] = []) => {
+    const polygon = clipPolygon(outer, E);
+    if (polygon.length < 3 || Math.abs(signedArea(polygon)) < 20) return;
+    const hs = holes.map((h) => clipPolygon(h, E)).filter((h) => h.length >= 3);
+    areas.push({ id, kind, polygon, holes: hs.length ? hs : undefined });
+  };
+  const areaKind = (tags: Record<string, string>): 'water' | 'park' | null => {
+    if (tags.natural === 'water' || tags.waterway === 'riverbank' || ['reservoir', 'basin'].includes(tags.landuse)) return 'water';
+    if (['park', 'garden', 'pitch', 'playground'].includes(tags.leisure) || ['grass', 'forest', 'recreation_ground', 'meadow', 'village_green'].includes(tags.landuse) || tags.natural === 'wood') return 'park';
+    return null;
+  };
 
   for (const el of json.elements) {
     const tags = el.tags ?? {};
@@ -141,8 +174,32 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
       if (tags.highway === 'traffic_signals') signalNodes.push(`n${el.id}`);
       continue;
     }
+    if (el.type === 'relation') {
+      const rings = (role: string) =>
+        joinWays((el.members ?? []).filter((m) => m.type === 'way' && m.role === role && m.geometry?.length).map((m) => m.geometry!.map((g) => proj.toLocal(g.lat, g.lon))))
+          .filter(isClosed)
+          .map((r) => r.slice(0, -1));
+      const outers = rings('outer');
+      const inners = rings('inner');
+      const rid = `r${el.id}`;
+      if (tags.building) {
+        const { use, source } = classifyUse(tags);
+        outers.forEach((footprint, k) => {
+          if (Math.abs(signedArea(footprint)) < 6) return;
+          const { height, source: heightSource } = parseHeight(tags, use, rid);
+          buildings.push({ id: `${rid}-${k}`, footprint, height, heightSource, use, useSource: source, name: tags.name, origin: 'real' });
+        });
+        continue;
+      }
+      const kind = areaKind(tags);
+      if (kind) outers.forEach((o, k) => pushArea(`${rid}-${k}`, kind, o, inners.filter((h) => pointInPolygon(h[0], o))));
+      continue;
+    }
     if (el.type !== 'way' || !el.geometry || !el.nodes || el.geometry.length < 2) continue;
     const pts = el.geometry.map((g) => proj.toLocal(g.lat, g.lon));
+    // Packs may cover more than requested: keep only features reaching into the requested circle.
+    const near = pts.some((p) => p[0] * p[0] + p[1] * p[1] < (radius * 1.08) ** 2);
+    if (!near && (tags.building || tags.highway || tags.railway)) continue;
     const nodeIds = el.nodes.map((n) => `n${n}`);
     const closed = el.nodes.length >= 4 && el.nodes[0] === el.nodes[el.nodes.length - 1];
     const id = `w${el.id}`;
@@ -180,10 +237,13 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
       continue;
     }
 
-    const isWater = tags.natural === 'water' || tags.waterway === 'riverbank' || ['reservoir', 'basin'].includes(tags.landuse);
-    const isPark = !!tags.leisure || ['grass', 'forest', 'recreation_ground', 'meadow', 'village_green'].includes(tags.landuse) || tags.natural === 'wood';
-    if ((isWater || isPark) && closed) {
-      areas.push({ id, kind: isWater ? 'water' : 'park', polygon: pts.slice(0, -1) });
+    if (tags.natural === 'coastline') {
+      coast.push(pts);
+      continue;
+    }
+    const aKind = areaKind(tags);
+    if (aKind && closed) {
+      pushArea(id, aKind, pts.slice(0, -1));
       continue;
     }
 
@@ -195,6 +255,15 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
     }
   }
 
+  if (coast.length) {
+    const { water, islands } = coastlineWater(coast, E);
+    // Sea first so lakes/parks/islands draw on top of it.
+    areas.unshift(
+      ...water.map((polygon, k) => ({ id: `sea-${k}`, kind: 'water' as const, polygon, sea: true })),
+      ...islands.map((polygon, k) => ({ id: `island-${k}`, kind: 'land' as const, polygon })),
+    );
+  }
+
   return {
     center, radius, buildings, roads, areas, rails, signalNodes,
     fetchedAt: new Date().toISOString(),
@@ -202,26 +271,104 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   };
 }
 
-/** Fetch the world for a location. Responses are cached with the Cache API so revisits are instant and offline-friendly. */
-export async function fetchWorld(center: LatLon, radius: number, signal?: AbortSignal): Promise<WorldData> {
-  const query = encodeURIComponent(buildOverpassQuery(center, radius));
-  const key = `${OVERPASS_MIRRORS[0]}?data=${query}`; // cache key independent of which mirror answered
-  const cache = typeof caches !== 'undefined' ? await caches.open('gcs-osm-v1').catch(() => null) : null;
-  let res = cache ? await cache.match(key) : undefined;
+const MIRROR_TIMEOUT_MS = 60_000;
+
+// ---------- static city packs (pre-built by scripts/build-city-packs.ts) ----------
+
+export const PACK_RADIUS = 850;
+export interface PackIndexEntry {
+  name: string;
+  lat: number;
+  lon: number;
+  radius: number;
+  file: string;
+  builtAt: string;
+}
+interface Pack {
+  center: LatLon;
+  radius: number;
+  core: OsmElement[];
+  extras: OsmElement[];
+}
+
+export const packFile = (c: LatLon) => `${c.lat.toFixed(4)}_${c.lon.toFixed(4)}.json`;
+
+const KEEP_TAGS = new Set([
+  'building', 'building:levels', 'height', 'amenity', 'shop', 'office', 'name', 'highway', 'oneway', 'junction', 'lanes',
+  'maxspeed', 'bridge', 'tunnel', 'layer', 'area', 'railway', 'natural', 'waterway', 'landuse', 'leisure', 'type',
+]);
+const r6 = (g: { lat: number; lon: number }) => ({ lat: Math.round(g.lat * 1e6) / 1e6, lon: Math.round(g.lon * 1e6) / 1e6 });
+
+/** Drop unused tags and round coordinates to ~10 cm so packs stay small. */
+export function slimElements(elements: unknown[]): OsmElement[] {
+  return (elements as OsmElement[]).map((e) => ({
+    type: e.type,
+    id: e.id,
+    ...(e.nodes ? { nodes: e.nodes } : {}),
+    ...(e.geometry ? { geometry: e.geometry.map(r6) } : {}),
+    ...(e.members ? { members: e.members.filter((m) => m.type === 'way').map((m) => ({ type: m.type, role: m.role, geometry: m.geometry?.map(r6) })) } : {}),
+    ...(e.tags ? { tags: Object.fromEntries(Object.entries(e.tags).filter(([k]) => KEEP_TAGS.has(k))) } : {}),
+  }));
+}
+
+const baseUrl = () => ((import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/');
+let packIndex: Promise<PackIndexEntry[]> | null = null;
+const packs = new Map<string, Promise<Pack | null>>();
+
+async function loadPack(c: LatLon, radius: number): Promise<Pack | null> {
+  if (typeof fetch === 'undefined') return null;
+  packIndex ??= fetch(`${baseUrl()}packs/index.json`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+  const entry = (await packIndex).find((e) => Math.abs(e.lat - c.lat) < 1e-4 && Math.abs(e.lon - c.lon) < 1e-4 && e.radius >= radius);
+  if (!entry) return null;
+  if (!packs.has(entry.file)) {
+    packs.set(entry.file, fetch(`${baseUrl()}packs/${entry.file}`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  }
+  return packs.get(entry.file)!;
+}
+
+
+async function overpass(query: string, signal?: AbortSignal): Promise<{ elements: OsmElement[] }> {
+  const q = encodeURIComponent(query);
+  const key = `${OVERPASS_MIRRORS[0]}?data=${q}`; // cache key independent of which mirror answered
+  const cache = typeof caches !== 'undefined' ? await caches.open('gcs-osm-v2').catch(() => null) : null;
+  const hit = cache ? await cache.match(key) : undefined;
+  if (hit) return hit.json();
   let lastError = '';
   for (const mirror of OVERPASS_MIRRORS) {
-    if (res) break;
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal?.addEventListener('abort', onAbort);
+    const timer = setTimeout(() => ctrl.abort(), MIRROR_TIMEOUT_MS);
     try {
-      const r = await fetch(`${mirror}?data=${query}`, { signal });
+      const r = await fetch(`${mirror}?data=${q}`, { signal: ctrl.signal });
       if (r.ok) {
-        res = r;
-        await cache?.put(key, r.clone()).catch(() => undefined);
-      } else lastError = `Map data servers are busy (${r.status}).`;
+        const body = await r.text(); // read fully inside the timeout window
+        const json = JSON.parse(body);
+        await cache?.put(key, new Response(body, { headers: { 'Content-Type': 'application/json' } })).catch(() => undefined);
+        return json;
+      }
+      lastError = `Map data servers are busy (${r.status}).`;
     } catch (e) {
-      if ((e as Error).name === 'AbortError') throw e;
-      lastError = 'Could not reach the map data servers.';
+      if (signal?.aborted) throw e;
+      lastError = 'Map data servers are slow or unreachable.';
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
-  if (!res) throw new Error(`${lastError} Try again in a moment.`);
-  return parseOverpass(await res.json(), center, radius);
+  throw new Error(`${lastError} Try again in a moment.`);
+}
+
+/** Load the playable city: buildings, roads, rail, signals. Cached with the Cache API; tries several free mirrors. */
+export async function fetchWorld(center: LatLon, radius: number, signal?: AbortSignal): Promise<WorldData> {
+  const pack = await loadPack(center, radius);
+  if (pack) return { ...parseOverpass({ elements: pack.core }, center, radius), source: 'OpenStreetMap (pre-built city pack)' };
+  return parseOverpass(await overpass(buildOverpassQuery(center, radius, 'core'), signal), center, radius);
+}
+
+/** Load water, parks and coastline-derived sea. Optional: callers should keep going if this fails. */
+export async function fetchAreas(center: LatLon, radius: number, signal?: AbortSignal) {
+  const pack = await loadPack(center, radius);
+  if (pack) return parseOverpass({ elements: pack.extras }, center, radius).areas;
+  return parseOverpass(await overpass(buildOverpassQuery(center, radius, 'extras'), signal), center, radius).areas;
 }

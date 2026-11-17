@@ -61,12 +61,15 @@ export interface Road {
   origin: Origin;
 }
 
-export type AreaKind = 'water' | 'park';
+export type AreaKind = 'water' | 'park' | 'land';
 
 export interface Area {
   id: string;
   kind: AreaKind;
   polygon: Vec2[];
+  holes?: Vec2[][];
+  /** Sea built from coastlines: rendered flat at sea level instead of draped on the (bathymetric) DEM. */
+  sea?: boolean;
 }
 
 export type RailKind = 'rail' | 'subway' | 'tram' | 'light_rail';

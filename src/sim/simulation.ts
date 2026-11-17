@@ -93,6 +93,18 @@ export interface SimStats {
 
 export type SignalState = 'green' | 'yellow' | 'red';
 
+/** Inspector-friendly description of one agent. */
+export interface AgentInfo {
+  id: number;
+  kind: AgentKind;
+  purpose: string;
+  from?: string;
+  to?: string;
+  speedKmh: number;
+  load?: number;
+  cap?: number;
+}
+
 const CYCLE = 64;
 const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus', { len: number; vmax: number; acc: number }> = {
   car: { len: 4.6, vmax: 1, acc: 2.5 },
@@ -444,8 +456,9 @@ export class Simulation {
     const target = Math.round(this.maxAgents * demandAt(this.time / 3600));
     let movers = 0;
     for (const a of this.agents) if (!a.bus) movers++;
-    for (let tries = 0; movers < target && tries < (this.filled ? 6 : target * 3); tries++) if (this.spawnTrip()) movers++;
-    this.filled = true;
+    // While warming up, spawn in bounded batches (placed mid-trip) so no single tick stalls.
+    for (let tries = 0; movers < target && tries < (this.filled ? 6 : 60); tries++) if (this.spawnTrip()) movers++;
+    if (movers >= target * 0.9) this.filled = true;
 
     // Group vehicles by (edge, lane) for car-following.
     const lanes = new Map<number, Agent[]>();
@@ -668,6 +681,16 @@ export class Simulation {
       signals: this.signals.size,
       busRoutes: this.routes.length,
       rerouted: this.rerouted,
+    };
+  }
+
+  describe(id: number): AgentInfo | null {
+    const a = this.agents.find((x) => x.id === id);
+    if (!a) return null;
+    return {
+      id: a.id, kind: a.kind, purpose: a.purpose, from: a.from, to: a.to,
+      speedKmh: (a.kind === 'pedestrian' || a.kind === 'bicycle' ? a.vmax : a.v) * 3.6,
+      load: a.bus?.load, cap: a.bus?.cap,
     };
   }
 

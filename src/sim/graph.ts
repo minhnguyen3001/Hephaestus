@@ -103,8 +103,11 @@ export class RoadGraph {
       }
     }
     for (const mode of ['car', 'walk'] as Mode[]) {
+      // Only snap to the largest connected network, so trips never start on an isolated fragment
+      // (which would make every route from it fail after an expensive search).
+      const main = g.largestComponent(mode);
       g.nodes.forEach((n, i) => {
-        if (!n.out.some((e) => g.edges[e][mode])) return;
+        if (!main.has(i) || !n.out.some((e) => g.edges[e][mode])) return;
         const key = g.cellKey(n.p);
         const arr = g.grids[mode].get(key) ?? [];
         arr.push(i);
@@ -112,6 +115,34 @@ export class RoadGraph {
       });
     }
     return g;
+  }
+
+  /** Largest weakly connected set of nodes usable by a mode. */
+  largestComponent(mode: Mode): Set<number> {
+    const adj = new Map<number, number[]>();
+    for (const e of this.edges) {
+      if (!e[mode]) continue;
+      (adj.get(e.from) ?? adj.set(e.from, []).get(e.from)!).push(e.to);
+      (adj.get(e.to) ?? adj.set(e.to, []).get(e.to)!).push(e.from);
+    }
+    const seen = new Set<number>();
+    let best = new Set<number>();
+    for (const start of adj.keys()) {
+      if (seen.has(start)) continue;
+      const comp = new Set<number>([start]);
+      const stack = [start];
+      seen.add(start);
+      while (stack.length) {
+        for (const nb of adj.get(stack.pop()!) ?? []) {
+          if (seen.has(nb)) continue;
+          seen.add(nb);
+          comp.add(nb);
+          stack.push(nb);
+        }
+      }
+      if (comp.size > best.size) best = comp;
+    }
+    return best;
   }
 
   private addEdge(e: Omit<GEdge, 'dir'>) {
@@ -149,7 +180,7 @@ export class RoadGraph {
   }
 
   /** A* shortest path. Cars minimize travel time, pedestrians distance. Returns edge indices or null. */
-  route(from: number, to: number, mode: Mode, maxExpanded = 20000): number[] | null {
+  route(from: number, to: number, mode: Mode, maxExpanded = 12000): number[] | null {
     if (from < 0 || to < 0) return null;
     if (from === to) return [];
     const target = this.nodes[to].p;

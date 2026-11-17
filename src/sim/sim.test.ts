@@ -149,6 +149,15 @@ describe('simulation', () => {
     expect(sim.stats().tripsCompleted).toBeGreaterThan(20);
   });
 
+  it('warms up in bounded batches so no single tick stalls', () => {
+    const sim = new Simulation(gridFixture(), profileFor('us'), 900, 2);
+    const buses = sim.agents.length;
+    sim.step(0.25);
+    expect(sim.agents.length - buses).toBeLessThanOrEqual(60);
+    sim.step(5);
+    expect(sim.agents.length - buses).toBeGreaterThan(100);
+  });
+
   it('stops cars at red lights', () => {
     const w = gridFixture();
     const sim = new Simulation(w, profileFor('us'), 10, 3);

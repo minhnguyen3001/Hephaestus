@@ -1,25 +1,13 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { Building, BuildingUse, Vec2 } from '../geo/types';
+import type { Building, Vec2 } from '../geo/types';
 import { hash01, signedArea } from '../geo/util';
 
 /** Local (x east, y north) → three.js (x, up, -north). */
 export const v3 = (p: Vec2, h = 0) => new THREE.Vector3(p[0], h, -p[1]);
 
-export const USE_COLORS: Record<BuildingUse, number> = {
-  residential: 0xead9c3,
-  commercial: 0xf1b98f,
-  office: 0xb8c8d9,
-  industrial: 0xcac3b3,
-  education: 0xe8cc76,
-  health: 0xf0a6a6,
-  civic: 0xc9b6e2,
-  religious: 0xe2cfaa,
-  parking: 0xaeb0b2,
-  unknown: 0xdfd8cd,
-};
-export const PROPOSED_COLOR = 0x3fd3c3;
-export const ESTIMATED_TINT = 0xff9a3c;
+import { ESTIMATED_TINT, PROPOSED_COLOR, USE_COLORS } from './palette';
+export { ESTIMATED_TINT, PROPOSED_COLOR, USE_COLORS };
 
 export interface BuildingStyle {
   highlightEstimated: boolean;
@@ -140,11 +128,13 @@ function normal(a: Vec2, b: Vec2): Vec2 | null {
   return l < 1e-6 ? null : [-dy / l, dx / l];
 }
 
-export function polygonGeometry(poly: Vec2[], y: Height, color: THREE.Color): THREE.BufferGeometry | null {
+export function polygonGeometry(poly: Vec2[], y: Height, color: THREE.Color, holes: Vec2[][] = []): THREE.BufferGeometry | null {
   if (poly.length < 3) return null;
-  const tris = THREE.ShapeUtils.triangulateShape(poly.map((p) => new THREE.Vector2(p[0], p[1])), []);
+  const all = [poly, ...holes].flat();
+  const v2 = (r: Vec2[]) => r.map((p) => new THREE.Vector2(p[0], p[1]));
+  const tris = THREE.ShapeUtils.triangulateShape(v2(poly), holes.map(v2));
   const pos: number[] = [];
-  for (const t of tris) for (const i of t) pos.push(poly[i][0], atH(y, poly[i]), -poly[i][1]);
+  for (const t of tris) for (const i of t) pos.push(all[i][0], atH(y, all[i]), -all[i][1]);
   return pos.length ? flatGeometry(pos, color) : null;
 }
 

@@ -1,29 +1,25 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { Building, Road, Vec2, WorldData } from '../geo/types';
+import type { Area, Building, Road, Vec2, WorldData } from '../geo/types';
 import { sampleTerrain } from '../geo/terrain';
 import { centroid, dist } from '../geo/util';
 import type { Edit } from '../project/edits';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
-import { AGENT_KINDS, Simulation, type Agent, type AgentKind, type SimStats } from '../sim/simulation';
+import { SimClient } from '../sim/client';
+import type { AgentView } from '../sim/protocol';
+import { AGENT_KINDS, type AgentInfo, type AgentKind, type SimStats } from '../sim/simulation';
+
+export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
 import { PRESETS, resolveQuality, type Quality, type QualitySetting } from './quality';
+import { pickMode, ToolController, type Tool } from './tools';
+import { ROAD_COLORS } from './palette';
 
-export type Tool = 'select' | 'build' | 'road' | 'bulldoze';
+export type { Tool };
 export type CameraMode = 'aerial' | 'neighborhood' | 'street' | 'inspect';
 
-export interface AgentInfo {
-  id: number;
-  kind: AgentKind;
-  purpose: string;
-  from?: string;
-  to?: string;
-  speedKmh: number;
-  load?: number;
-  cap?: number;
-}
 
 export type Selection =
   | { type: 'building'; building: Building }
@@ -36,6 +32,23 @@ export interface Perf {
   drawCalls: number;
   triangles: number;
   quality: Quality;
+}
+
+/** What the UI needs from any world view (3D engine or 2D plan). */
+export interface WorldRenderer {
+  running: boolean;
+  speed: number;
+  setWorld(world: WorldData, region: RegionProfile): void;
+  setTool(t: Tool): void;
+  setLayers(l: Layers): void;
+  setTime(seconds: number): void;
+  resetSim(): void;
+  select(sel: { type: 'building' | 'road' | 'agent'; id: string | number } | null): void;
+  follow(agentId: number | null): void;
+  setCameraMode(mode: CameraMode): void;
+  focusSelected(): void;
+  orbitStep(radians: number): void;
+  dispose(): void;
 }
 
 export interface EngineCallbacks {
@@ -52,10 +65,6 @@ export interface Layers {
   estimated: boolean;
 }
 
-const ROAD_COLORS: Record<string, number> = {
-  highway: 0x58616d, primary: 0x646d79, secondary: 0x6d7682, tertiary: 0x737c87,
-  residential: 0x7d858f, service: 0x8a919a, footway: 0xd3cab8, cycleway: 0xcf9474,
-};
 const ROAD_Y: Record<string, number> = {
   highway: 0.14, primary: 0.13, secondary: 0.12, tertiary: 0.115, residential: 0.11, service: 0.1, footway: 0.07, cycleway: 0.08,
 };
@@ -71,7 +80,7 @@ const SKY_DAY = new THREE.Color(0xa8cbe8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
 const SKY_NIGHT = new THREE.Color(0x0b1322);
 
-export class Engine {
+export class Engine implements WorldRenderer {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
@@ -84,7 +93,7 @@ export class Engine {
   private ground?: THREE.Mesh;
   private transitGroup = new THREE.Group();
   private agentMeshes = {} as Record<AgentKind, THREE.InstancedMesh>;
-  private agentSlots = {} as Record<AgentKind, Agent[]>;
+  private agentSlots = {} as Record<AgentKind, AgentView[]>;
   private trainMesh: THREE.InstancedMesh;
   private highlight?: THREE.Object3D;
   private roadPreview?: THREE.Line;
@@ -93,12 +102,18 @@ export class Engine {
   private flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   private world?: WorldData;
   private region?: RegionProfile;
-  sim?: Simulation;
+  sim?: SimClient;
   private roadSignature = '';
   running = true;
   speed = 1;
-  private tool: Tool = 'select';
-  private roadStart?: { p: Vec2; node?: string };
+  private tools = new ToolController({
+    onEdit: (e) => this.cb.onEdit(e),
+    onHint: (m) => this.cb.onHint(m),
+    select: (sel) => this.select(sel),
+    follow: (id) => this.follow(id),
+    preselect: (sel) => (this.selected = sel),
+    clearPreview: () => this.clearRoadPreview(),
+  });
   private selected: { type: 'building' | 'road' | 'agent'; id: string | number } | null = null;
   private followId: number | null = null;
   private keys = new Set<string>();
@@ -199,9 +214,7 @@ export class Engine {
     this.world = world;
     const sig = world.roads.map((r) => r.id).join('|') + region.id;
     if (!this.sim || sig !== this.roadSignature || region !== this.region) {
-      const time = this.sim?.time;
-      this.sim = new Simulation(world, region, PRESETS[this.quality].maxAgents);
-      if (time !== undefined) this.sim.time = time;
+      this.startSim(world, region, 1);
       this.roadSignature = sig;
     }
     this.region = region;
@@ -212,16 +225,7 @@ export class Engine {
   }
 
   setTool(t: Tool) {
-    this.tool = t;
-    this.roadStart = undefined;
-    this.clearRoadPreview();
-    const hints: Record<Tool, string | null> = {
-      select: null,
-      build: 'Click on open ground to place a new building.',
-      road: 'Click a start point, then an end point. Ends snap to nearby intersections.',
-      bulldoze: 'Click a building or road to remove it from the proposal.',
-    };
-    this.cb.onHint(hints[t]);
+    this.tools.set(t);
   }
 
   setLayers(l: Layers) {
@@ -232,14 +236,18 @@ export class Engine {
   }
 
   setTime(seconds: number) {
-    if (this.sim) this.sim.time = ((seconds % 86400) + 86400) % 86400;
+    this.sim?.setTime(((seconds % 86400) + 86400) % 86400);
   }
 
   resetSim() {
-    if (!this.world || !this.region) return;
+    if (this.world && this.region) this.startSim(this.world, this.region, Math.floor(Math.random() * 1e9));
+  }
+
+  private startSim(world: WorldData, region: RegionProfile, seed: number) {
     const time = this.sim?.time ?? 7.5 * 3600;
-    this.sim = new Simulation(this.world, this.region, PRESETS[this.quality].maxAgents, Math.floor(Math.random() * 1e9));
-    this.sim.time = time;
+    this.sim?.dispose();
+    this.sim = new SimClient(world, region, PRESETS[this.quality].maxAgents, seed, time);
+    this.sim.onInfo = () => this.buildTransit();
     this.buildTransit();
   }
 
@@ -304,6 +312,7 @@ export class Engine {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     this.controls.dispose();
+    this.sim?.dispose();
     this.scene.traverse((o) => {
       const m = o as THREE.Mesh;
       m.geometry?.dispose();
@@ -389,8 +398,10 @@ export class Engine {
     }
     this.ground.userData.ground = true;
 
+    const E = r * 1.3;
+    const areaColor = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
     const areaGeoms = w.areas
-      .map((a) => polygonGeometry(a.polygon, (p) => this.hp(p) + lift + (a.kind === 'water' ? 0.04 : 0.05), new THREE.Color(a.kind === 'water' ? 0x77abd3 : 0xa6c98c)))
+      .map((a) => polygonGeometry(a.polygon, this.areaHeight(a, E, lift), new THREE.Color(areaColor[a.kind]), a.holes))
       .filter((g): g is THREE.BufferGeometry => !!g);
     if (areaGeoms.length) {
       const m = new THREE.Mesh(mergeGeometries(areaGeoms)!, this.flatMat);
@@ -472,6 +483,15 @@ export class Engine {
     this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
   }
 
+  /** Water is flat: the sea at the median coast height, lakes and rivers at their lowest shore. Parks drape. */
+  private areaHeight(a: Area, E: number, lift: number): number | ((p: Vec2) => number) {
+    if (!this.world?.terrain) return a.kind === 'water' ? 0.04 : a.kind === 'land' ? 0.06 : 0.05;
+    if (a.kind === 'park' || a.kind === 'land') return (p: Vec2) => this.hp(p) + lift + 0.05;
+    const shore = a.polygon.filter((p) => !a.sea || (Math.abs(Math.abs(p[0]) - E) > 1 && Math.abs(Math.abs(p[1]) - E) > 1)).map(this.hp).sort((x, y) => x - y);
+    if (!shore.length) return 0;
+    return (a.sea ? shore[Math.floor(shore.length / 2)] : shore[0]) + 0.3;
+  }
+
   /** Buildings sit on the lowest ground under their footprint so no wall floats. */
   private base(b: Building) {
     if (!this.world?.terrain) return 0;
@@ -484,11 +504,11 @@ export class Engine {
     this.clearGroup(this.transitGroup);
     if (!this.sim || !this.region) return;
     const color = new THREE.Color(this.region.busColor);
-    const geoms = this.sim.busRouteLines().map((l) => ribbonGeometry(l, 1.1, (p) => this.hp(p) + this.lift + 0.16, color)).filter((g): g is THREE.BufferGeometry => !!g);
+    const geoms = this.sim.info.routes.map((l) => ribbonGeometry(l, 1.1, (p) => this.hp(p) + this.lift + 0.16, color)).filter((g): g is THREE.BufferGeometry => !!g);
     if (geoms.length) {
       this.transitGroup.add(new THREE.Mesh(mergeGeometries(geoms)!, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false })));
     }
-    const stops = this.sim.stopPositions();
+    const stops = this.sim.info.stops;
     if (stops.length) {
       const m = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.6, 3.2, 8).translate(0, 1.6, 0), new THREE.MeshStandardMaterial({ color: this.region.busColor, emissive: this.region.busColor, emissiveIntensity: 0.25 }), stops.length);
       stops.forEach((p, i) => m.setMatrixAt(i, this.tmpM.makeTranslation(p[0] + 3, this.h(p[0] + 3, p[1] + 3), -p[1] - 3)));
@@ -524,31 +544,29 @@ export class Engine {
       }
       this.cb.onSelect({ type: 'road', road: r });
     } else {
-      const a = this.sim?.agents.find((x) => x.id === s.id);
-      if (!a) {
+      const id = s.id as number;
+      const a = this.sim?.agents.find((x) => x.id === id);
+      if (!a || !this.sim) {
         this.selected = null;
         this.followId = null;
+        this.sim?.watch(null);
         return this.cb.onSelect(null);
       }
-      this.cb.onSelect({ type: 'agent', agent: this.agentInfo(a) });
+      this.sim.watch(id);
+      this.cb.onSelect({ type: 'agent', agent: this.sim.describe(id) ?? { id, kind: a.kind, purpose: '…', speedKmh: 0 } });
     }
   }
 
-  private agentInfo(a: Agent): AgentInfo {
-    return {
-      id: a.id, kind: a.kind, purpose: a.purpose, from: a.from, to: a.to,
-      speedKmh: (a.kind === 'pedestrian' || a.kind === 'bicycle' ? a.vmax : a.v) * 3.6,
-      load: a.bus?.load, cap: a.bus?.cap,
-    };
-  }
 
   // ---------- per frame ----------
 
   private loop = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.1, this.clock.getDelta());
-    if (this.sim && this.running) this.sim.step(dt * this.speed);
+    const raw = this.clock.getDelta();
+    const dt = Math.min(0.1, raw);
+    // Simulation runs on wall-clock time so a slow GPU never slows the city down (capped after tab switches).
+    if (this.sim && this.running) this.sim.step(Math.min(1, raw) * this.speed);
     this.updateAgents();
     this.updateCamera(dt);
     this.controls.update();
@@ -586,7 +604,7 @@ export class Engine {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
-    const cars = sim.trainCars();
+    const cars = sim.trains;
     const s = new THREE.Vector3();
     cars.forEach((c, i) => {
       if (i >= 200) return;
@@ -696,7 +714,7 @@ export class Engine {
     this.statsT += dt;
     if (this.statsT > 0.5 && this.sim) {
       this.statsT = 0;
-      this.cb.onStats(this.sim.stats());
+      if (this.sim.stats) this.cb.onStats({ ...this.sim.stats, time: this.sim.time });
       if (this.selected?.type === 'agent') this.refreshSelection();
     }
     if (this.perfT < 1) return;
@@ -752,11 +770,11 @@ export class Engine {
   };
 
   private onPointerMove = (e: PointerEvent) => {
-    if (this.tool !== 'road' || !this.roadStart) return;
+    if (this.tools.tool !== 'road' || !this.tools.roadStart) return;
     const hit = this.pick(e, 'ground');
     if (!hit) return;
     this.clearRoadPreview();
-    const geom = new THREE.BufferGeometry().setFromPoints([v3(this.roadStart.p, this.hp(this.roadStart.p) + 0.8), v3(hit.p, this.hp(hit.p) + 0.8)]);
+    const geom = new THREE.BufferGeometry().setFromPoints([v3(this.tools.roadStart.p, this.hp(this.tools.roadStart.p) + 0.8), v3(hit.p, this.hp(hit.p) + 0.8)]);
     this.roadPreview = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x3fd3c3 }));
     this.scene.add(this.roadPreview);
   };
@@ -797,57 +815,8 @@ export class Engine {
   }
 
   private handleClick(e: PointerEvent) {
-    const hit = this.pick(e, this.tool === 'road' ? 'ground' : this.tool === 'select' ? 'all' : 'static');
-    if (!hit) return;
-    if (this.tool === 'select') {
-      if (hit.kind === 'ground') return this.select(null);
-      this.select({ type: hit.kind, id: hit.id });
-      if (hit.kind === 'agent') this.follow(hit.id as number);
-    } else if (this.tool === 'bulldoze') {
-      if (hit.kind === 'building') this.cb.onEdit({ kind: 'demolish', id: hit.id as string });
-      else if (hit.kind === 'road') this.cb.onEdit({ kind: 'removeRoad', id: hit.id as string });
-    } else if (this.tool === 'build') {
-      if (hit.kind !== 'ground' && hit.kind !== 'road') return this.cb.onHint('That spot is occupied — click open ground.');
-      const s = 12;
-      const [x, y] = hit.p;
-      const id = `u-b-${Date.now().toString(36)}`;
-      this.cb.onEdit({
-        kind: 'addBuilding',
-        building: {
-          id, footprint: [[x - s, y - s], [x + s, y - s], [x + s, y + s], [x - s, y + s]], height: 36,
-          heightSource: 'user', use: 'residential', useSource: 'user', origin: 'proposed', name: 'Proposed building',
-        },
-      });
-      this.selected = { type: 'building', id };
-    } else if (this.tool === 'road') {
-      const snap = this.snapNode(hit.p);
-      if (!this.roadStart) {
-        this.roadStart = snap;
-        this.cb.onHint('Now click the end point (Esc to cancel).');
-        return;
-      }
-      const start = this.roadStart;
-      this.roadStart = undefined;
-      this.clearRoadPreview();
-      if (dist(start.p, snap.p) < 5) return this.cb.onHint('Road too short — try again.');
-      const stamp = Date.now().toString(36);
-      this.cb.onEdit({
-        kind: 'addRoad',
-        road: {
-          id: `u-r-${stamp}`, nodes: [start.node ?? `u-n-${stamp}-a`, snap.node ?? `u-n-${stamp}-b`], points: [start.p, snap.p],
-          kind: 'tertiary', lanes: 2, oneway: false, maxspeedKmh: 40, name: 'Proposed street', origin: 'proposed',
-        },
-      });
-      this.cb.onHint('Road added. Click to start another, or switch tools.');
-    }
-  }
-
-  private snapNode(p: Vec2): { p: Vec2; node?: string } {
-    const g = this.sim?.graph;
-    if (!g) return { p };
-    const i = g.nearestNode(p, 'car');
-    if (i >= 0 && dist(g.nodes[i].p, p) < 25) return { p: g.nodes[i].p, node: g.nodes[i].id };
-    return { p };
+    const hit = this.pick(e, pickMode(this.tools.tool));
+    if (hit) this.tools.click(hit, this.world);
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -856,8 +825,7 @@ export class Engine {
     if (e.metaKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
     if (k === 'escape') {
-      this.roadStart = undefined;
-      this.clearRoadPreview();
+      this.tools.cancel();
       this.select(null);
       return;
     }

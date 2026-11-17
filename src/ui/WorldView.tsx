@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchWorld } from '../geo/osm';
+import { fetchAreas, fetchWorld } from '../geo/osm';
 import { fetchTerrain } from '../geo/terrain';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
 import { saveProject, type Project } from '../project/store';
-import { Engine, type CameraMode, type Layers, type Perf, type Selection, type Tool } from '../render/engine';
+import { Engine, type CameraMode, type Layers, type Perf, type Selection, type Tool, type WorldRenderer } from '../render/engine';
+import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
 import { profileFor } from '../sim/region';
 import type { SimStats } from '../sim/simulation';
@@ -20,6 +21,15 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
+const VIEW_KEY = 'gcs.view';
+
+function readView(): '3d' | '2d' {
+  try {
+    return localStorage.getItem(VIEW_KEY) === '2d' ? '2d' : '3d';
+  } catch {
+    return '3d';
+  }
+}
 
 function readQuality(): QualitySetting {
   try {
@@ -55,10 +65,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       return false;
     }
   });
-  const [webglError, setWebglError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'3d' | '2d'>(readView);
 
   const host = useRef<HTMLDivElement>(null);
-  const engine = useRef<Engine | null>(null);
+  const engine = useRef<WorldRenderer | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -78,32 +88,37 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     setHistory((h) => pushEdit(h, e));
   }, []);
 
-  // Engine lifecycle. Recreated when quality changes (antialiasing is fixed at context creation).
+  // Renderer lifecycle. Recreated when quality or view mode changes (antialiasing is fixed at context creation).
   useEffect(() => {
     if (!host.current) return;
-    let eng: Engine;
-    try {
-      eng = new Engine(host.current, {
-        onSelect: (s) => {
-          setSelection(s);
-          if (s?.type !== 'agent') setFollowing(null);
-        },
-        onEdit: edit,
-        onStats: setStats,
-        onPerf: setPerf,
-        onHint: setHint,
-      }, quality);
-    } catch {
-      setWebglError('Your browser could not start 3D graphics (WebGL). Try updating your browser or enabling hardware acceleration.');
-      return;
-    }
-    engine.current = eng;
-    if (shownRef.current) eng.setWorld(shownRef.current, region);
+    const callbacks = {
+      onSelect: (s: Selection | null) => {
+        setSelection(s);
+        if (s?.type !== 'agent') setFollowing(null);
+      },
+      onEdit: edit,
+      onStats: setStats,
+      onPerf: setPerf,
+      onHint: setHint,
+    };
+    let r: WorldRenderer;
+    if (mode === '3d') {
+      try {
+        r = new Engine(host.current, callbacks, quality);
+      } catch {
+        // No WebGL: the 2D plan view keeps every planning feature available.
+        setHint('3D graphics are unavailable on this device, so the 2D plan view is shown.');
+        setMode('2d');
+        return;
+      }
+    } else r = new Plan2D(host.current, callbacks);
+    engine.current = r;
+    if (shownRef.current) r.setWorld(shownRef.current, region);
     return () => {
-      eng.dispose();
+      r.dispose();
       engine.current = null;
     };
-  }, [quality, region, edit]);
+  }, [quality, region, edit, mode]);
 
   useEffect(() => {
     if (shown) engine.current?.setWorld(shown, region);
@@ -111,25 +126,29 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
 
   useEffect(() => {
     engine.current?.setTool(view === 'original' ? 'select' : tool);
-  }, [tool, view, quality]);
-  useEffect(() => engine.current?.setLayers(layers), [layers, quality]);
+  }, [tool, view, quality, mode]);
+  useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
       engine.current.speed = speed;
     }
-  }, [running, speed, quality]);
+  }, [running, speed, quality, mode]);
 
   // Load real-world data for the project's location.
   useEffect(() => {
     const ctrl = new AbortController();
     setError(null);
     const center = { lat: project.place.lat, lon: project.place.lon };
-    Promise.all([fetchWorld(center, project.radius, ctrl.signal), fetchTerrain(center, project.radius, ctrl.signal)])
-      .then(([w, terrain]) => {
-        w.terrain = terrain;
+    const terrain = fetchTerrain(center, project.radius, ctrl.signal);
+    Promise.all([fetchWorld(center, project.radius, ctrl.signal), terrain])
+      .then(([w, t]) => {
         if (!w.buildings.length && !w.roads.length) setError('No mapped streets or buildings were found here. Try a more central location.');
-        setBase(w);
+        setBase({ ...w, terrain: t });
+        // Water and parks stream in afterwards; the city is usable without them.
+        fetchAreas(center, project.radius, ctrl.signal)
+          .then((areas) => setBase((b) => (b ? { ...b, areas } : b)))
+          .catch(() => setHint('Water and parks could not be loaded right now (map servers busy).'));
       })
       .catch((e: Error) => {
         if (e.name !== 'AbortError') setError(e.message || 'Could not load map data.');
@@ -237,11 +256,24 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       </nav>
 
       <div className="panel cambar" role="group" aria-label="Camera">
+        <button
+          className="mode-btn"
+          onClick={() => {
+            const m = mode === '3d' ? '2d' : '3d';
+            setMode(m);
+            try { localStorage.setItem(VIEW_KEY, m); } catch { /* ignore */ }
+          }}
+          title="Switch between the 3D city and the 2D plan view"
+        >
+          {mode === '3d' ? '2D plan' : '3D view'}
+        </button>
         <button onClick={() => setCam('aerial')}>Aerial</button>
         <button onClick={() => setCam('neighborhood')}>District</button>
         <button onClick={() => setCam('street')}>Street</button>
-        <button onClick={() => engine.current?.orbitStep(Math.PI / 4)} aria-label="Orbit left">⟲</button>
-        <button onClick={() => engine.current?.orbitStep(-Math.PI / 4)} aria-label="Orbit right">⟳</button>
+        {mode === '3d' && <>
+          <button onClick={() => engine.current?.orbitStep(Math.PI / 4)} aria-label="Orbit left">⟲</button>
+          <button onClick={() => engine.current?.orbitStep(-Math.PI / 4)} aria-label="Orbit right">⟳</button>
+        </>}
       </div>
 
       <div className="panel layers" role="group" aria-label="Layers">
@@ -291,12 +323,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {base?.terrain && <> · Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">AWS Terrain Tiles</a></>}
       </footer>
 
-      {(loading || error || webglError) && (
+      {(loading || error) && (
         <div className="overlay">
           <div className="overlay-card">
-            {webglError ? (
-              <><h2>3D unavailable</h2><p>{webglError}</p><button onClick={onExit}>Back</button></>
-            ) : error ? (
+            {error ? (
               <><h2>Couldn’t load this place</h2><p>{error}</p><div className="row"><button onClick={() => setAttempt((a) => a + 1)}>Try again</button><button className="ghost" onClick={onExit}>Back</button></div></>
             ) : (
               <><div className="spinner" /><h2>Building {project.place.name}</h2><p>Loading real streets, buildings and rail lines within {project.radius} m from OpenStreetMap…</p></>

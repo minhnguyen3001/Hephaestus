@@ -78,3 +78,46 @@ test('hilly city loads real terrain', async ({ page }) => {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: 'test-results/08-terrain-street.png' });
 });
+
+test('coastal city renders sea from coastlines', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Central/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: 'test-results/09-coast.png' });
+});
+
+test('2D plan view: pack data, select, build, undo, simulate', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 }); // from the static pack
+  await page.getByRole('button', { name: '2D plan' }).click();
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: 'test-results/10-plan2d.png' });
+  await expect(page.locator('.kinds')).toContainText('Cars');
+
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  let opened = false;
+  for (const [fx, fy] of [[0.5, 0.5], [0.55, 0.45], [0.45, 0.55], [0.6, 0.6], [0.4, 0.4]]) {
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    if (await page.locator('.inspector').isVisible()) { opened = true; break; }
+  }
+  expect(opened).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.getByRole('button', { name: 'Place building' }).click();
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.08 + 70); // outside the loaded circle = open ground
+  await expect(page.getByRole('button', { name: /Proposed · 1/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(page.getByRole('button', { name: /^Proposed$/ })).toBeVisible();
+  await page.getByRole('button', { name: '3D view' }).click();
+  await page.waitForTimeout(1000);
+  expect(errors).toEqual([]);
+});

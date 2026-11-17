@@ -123,6 +123,7 @@ select option { background: var(--panel-solid); }
 
 .cambar { left: 50%; transform: translateX(-50%); top: 64px; display: flex; gap: 4px; padding: 4px; z-index: 5; }
 .cambar button { border: none; background: transparent; padding: 5px 10px; }
+.cambar .mode-btn { color: var(--accent); font-weight: 600; border-right: 1px solid var(--line); border-radius: 8px 0 0 8px; }
 .layers { left: 14px; bottom: 84px; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; font-size: 12.5px; z-index: 5; }
 .layers label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
 .layers input { accent-color: var(--accent); }
