@@ -200,9 +200,12 @@ const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus', { len: nu
 };
 const isVehicle = (k: AgentKind) => k !== 'pedestrian' && k !== 'bicycle';
 
-/** Daily travel-demand curve in [0,1]: AM/PM peaks, midday shoulder, quiet nights. */
-export function demandAt(hour: number): number {
+export type DayType = 'weekday' | 'weekend';
+
+/** Daily travel-demand curve in [0,1]. Weekdays: AM/PM commute peaks; weekends: one broad leisure peak. */
+export function demandAt(hour: number, day: DayType = 'weekday'): number {
   const g = (mu: number, w: number) => Math.exp(-((hour - mu) ** 2) / (2 * w * w));
+  if (day === 'weekend') return Math.min(1, (hour < 6 ? 0.07 : 0.1) + 0.68 * g(14.5, 3.2) + 0.15 * g(21, 1.5));
   const night = hour < 5 ? 0.06 : 0.14;
   return Math.min(1, night + 0.86 * Math.max(g(8.2, 1.1), g(17.6, 1.3)) + 0.4 * g(13, 2.4));
 }
@@ -251,6 +254,9 @@ export class Simulation {
   private filled = false;
   private samplers!: Record<'residents' | 'jobs' | 'attract' | 'school' | 'freight' | 'any', ReturnType<typeof makeSampler<Site>>>;
   totals = { residents: 0, jobs: 0 };
+  day: DayType = 'weekday';
+  /** Multiplier on travel demand (timeline projections). Capped to protect frame rate. */
+  demandScale = 1;
 
   constructor(world: WorldData, readonly region: RegionProfile, public maxAgents = 400, seed = 1) {
     this.rand = rng(seed);
@@ -548,8 +554,10 @@ export class Simulation {
     const r = this.rand();
     const s = this.samplers;
     const pick = (k: keyof typeof s) => s[k].sample(this.rand());
-    if (h >= 9 && h < 18 && r < 0.07) return { purpose: 'delivery', o: pick('freight'), d: pick('attract') };
-    if (h >= 5 && h < 10.5) {
+    if (h >= 9 && h < 18 && r < (this.day === 'weekend' ? 0.03 : 0.07)) return { purpose: 'delivery', o: pick('freight'), d: pick('attract') };
+    if (this.day === 'weekend') {
+      if (r < 0.12) return { purpose: 'commute', o: pick('residents'), d: pick('jobs') };
+    } else if (h >= 5 && h < 10.5) {
       if (r < 0.68) return { purpose: 'commute', o: pick('residents'), d: pick('jobs') };
       if (r < 0.82 && s.school.total > 0) return { purpose: 'school', o: pick('residents'), d: pick('school') };
     } else if (h >= 15 && h < 20) {
@@ -677,7 +685,7 @@ export class Simulation {
     const g = this.graph;
 
     // Keep the population of moving agents near demand for this time of day.
-    const target = Math.round(this.maxAgents * demandAt(this.time / 3600));
+    const target = Math.round(this.maxAgents * Math.min(1.8, this.demandScale) * demandAt(this.time / 3600, this.day));
     let movers = 0;
     for (const a of this.agents) if (!a.bus) movers++;
     // While warming up, spawn in bounded batches (placed mid-trip) so no single tick stalls.

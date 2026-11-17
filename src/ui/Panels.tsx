@@ -4,7 +4,7 @@ import { signedArea } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
-import { AGENT_KINDS, buildingCapacity, type SimStats } from '../sim/simulation';
+import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats } from '../sim/simulation';
 import type { CityMetrics } from './metrics';
 
 const USES: BuildingUse[] = ['residential', 'commercial', 'office', 'industrial', 'education', 'health', 'civic', 'religious', 'parking', 'unknown'];
@@ -133,7 +133,7 @@ function AgentInspector({ a, following, onFollow }: { a: AgentInfo; following: b
 }
 
 export function SimBar({
-  stats, running, speed, onRun, onSpeed, onTime, onReset,
+  stats, running, speed, onRun, onSpeed, onTime, onReset, day, onDay, horizon, onHorizon, growth,
 }: {
   stats: SimStats | null;
   running: boolean;
@@ -142,6 +142,11 @@ export function SimBar({
   onSpeed: (s: number) => void;
   onTime: (t: number) => void;
   onReset: () => void;
+  day: DayType;
+  onDay: (d: DayType) => void;
+  horizon: number;
+  onHorizon: (y: number) => void;
+  growth: number;
 }) {
   const t = stats?.time ?? 0;
   const hh = String(Math.floor(t / 3600)).padStart(2, '0');
@@ -156,12 +161,23 @@ export function SimBar({
           <button key={s} className={speed === s ? 'on' : ''} onClick={() => onSpeed(s)}>{s}×</button>
         ))}
       </div>
+      <select value={day} onChange={(e) => onDay(e.target.value as DayType)} aria-label="Day type" className="hide-sm">
+        <option value="weekday">Weekday</option>
+        <option value="weekend">Weekend</option>
+      </select>
+      <select value={horizon} onChange={(e) => onHorizon(+e.target.value)} aria-label="Timeline" className="hide-sm"
+        title={`Projection assumes travel demand grows ${(growth * 100).toFixed(1)}% per year. Illustrative, not a forecast.`}>
+        <option value={0}>Today</option>
+        <option value={5}>+5 years</option>
+        <option value={10}>+10 years</option>
+        <option value={20}>+20 years</option>
+      </select>
       <button className="ghost" onClick={onReset} title="Restart the simulation with new synthetic trips">Reset</button>
     </div>
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0 }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number }) {
   const delta = (a: number, b: number, digits = 0) => {
     const d = a - b;
     if (Math.abs(d) < 10 ** -digits / 2) return null;
@@ -200,7 +216,16 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
           </div>
         </>
       )}
-      <h4>Live simulation</h4>
+      <h4>Live simulation{horizon ? ` · projected +${horizon} years` : ''}</h4>
+      {horizon > 0 && (
+        <p className="note projection">
+          Projection: travel demand ×{((1 + region.growth) ** horizon).toFixed(2)} (assumes {(region.growth * 100).toFixed(1)}%/yr growth for {region.label}).
+          {(() => {
+            const need = original.residents * (1 + region.growth) ** horizon;
+            return need > proposed.residents ? ` Housing shortfall: ~${fmt(need - proposed.residents)} people.` : ` Housing capacity covers the projected population.`;
+          })()} Illustrative, not a forecast.
+        </p>
+      )}
       {stats ? (
         <>
           <div className="metrics">

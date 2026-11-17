@@ -10,7 +10,7 @@ import type { ZoneOptions } from '../render/tools';
 import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
 import { profileFor } from '../sim/region';
-import type { SimStats } from '../sim/simulation';
+import type { DayType, SimStats } from '../sim/simulation';
 import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
@@ -66,6 +66,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [running, setRunning] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [lineMode, setLineMode] = useState<'bus' | 'metro'>('bus');
+  const [day, setDay] = useState<DayType>('weekday');
+  const [horizon, setHorizon] = useState(0);
   const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -178,6 +180,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
   useEffect(() => engine.current?.setLineMode(lineMode), [lineMode, quality, mode]);
   useEffect(() => engine.current?.setZoneOptions(zoneOpts), [zoneOpts, quality, mode]);
+  useEffect(() => engine.current?.setSimParams(day, (1 + region.growth) ** horizon), [day, horizon, region, quality, mode]);
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
@@ -411,7 +414,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
+        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}
 
       <SimBar
@@ -422,6 +425,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           if (stats) setStats({ ...stats, time: t });
         }}
         onReset={() => engine.current?.resetSim()}
+        day={day} onDay={setDay} horizon={horizon} onHorizon={setHorizon} growth={region.growth}
       />
 
       {tool === 'transit' && editable && (

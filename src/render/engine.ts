@@ -11,7 +11,7 @@ import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
 import type { AgentView } from '../sim/protocol';
-import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type SimStats } from '../sim/simulation';
+import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type DayType, type SimStats } from '../sim/simulation';
 
 export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
@@ -56,6 +56,7 @@ export interface WorldRenderer {
   setLineMode(m: 'bus' | 'metro'): void;
   getView(): SavedView;
   setView(v: SavedView): void;
+  setSimParams(day: DayType, demandScale: number): void;
   dispose(): void;
 }
 
@@ -277,6 +278,7 @@ export class Engine implements WorldRenderer {
     const time = this.sim?.time ?? 7.5 * 3600;
     this.sim?.dispose();
     this.sim = new SimClient(world, region, PRESETS[this.quality].maxAgents, seed, time);
+    this.sim.setParams(...this.simParams);
     this.sim.onInfo = () => this.buildTransit();
     this.buildTransit();
   }
@@ -629,6 +631,12 @@ export class Engine implements WorldRenderer {
 
   finishDraft() {
     this.tools.finish(this.world);
+  }
+
+  private simParams: [DayType, number] = ['weekday', 1];
+  setSimParams(day: DayType, demandScale: number) {
+    this.simParams = [day, demandScale];
+    this.sim?.setParams(day, demandScale);
   }
 
   setZoneOptions(o: ZoneOptions) {

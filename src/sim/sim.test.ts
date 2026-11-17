@@ -133,9 +133,21 @@ describe('proposed roads join the network', () => {
 });
 
 describe('simulation', () => {
-  it('has rush-hour peaks', () => {
+  it('has rush-hour peaks on weekdays and a midday peak on weekends', () => {
     expect(demandAt(8.2)).toBeGreaterThan(0.9);
     expect(demandAt(3)).toBeLessThan(0.2);
+    expect(demandAt(8.2, 'weekend')).toBeLessThan(demandAt(14.5, 'weekend'));
+    expect(demandAt(8.2, 'weekend')).toBeLessThan(demandAt(8.2));
+  });
+
+  it('scales demand for timeline projections', () => {
+    const run = (scale: number) => {
+      const sim = new Simulation(gridFixture(), profileFor('us'), 150, 5);
+      sim.demandScale = scale;
+      sim.step(60);
+      return sim.agents.filter((a) => !a.bus).length;
+    };
+    expect(run(1.5)).toBeGreaterThan(run(1) * 1.2);
   });
 
   it('picks regional profiles and driving side', () => {

@@ -1,11 +1,12 @@
 import type { Vec2 } from '../geo/types';
-import { AGENT_KINDS, type AgentInfo, type AgentKind, type SignalHead, type SimStats, type Simulation, type TrainCar, type TransitLineView } from './simulation';
+import { AGENT_KINDS, type AgentInfo, type AgentKind, type DayType, type SignalHead, type SimStats, type Simulation, type TrainCar, type TransitLineView } from './simulation';
 
 export type ToWorker =
   | { t: 'init'; world: unknown; region: unknown; maxAgents: number; seed: number; time: number }
   | { t: 'step'; dt: number }
   | { t: 'time'; time: number }
-  | { t: 'watch'; id: number | null };
+  | { t: 'watch'; id: number | null }
+  | { t: 'params'; day: DayType; demandScale: number };
 
 export interface Frame {
   t: 'frame';

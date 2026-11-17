@@ -5,7 +5,7 @@ import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
-import { signalPhase } from '../sim/simulation';
+import { signalPhase, type DayType } from '../sim/simulation';
 import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
 import { PRESETS } from './quality';
@@ -167,6 +167,12 @@ export class Plan2D implements WorldRenderer {
     this.tools.finish(this.world);
   }
 
+  private simParams: [DayType, number] = ['weekday', 1];
+  setSimParams(day: DayType, demandScale: number) {
+    this.simParams = [day, demandScale];
+    this.sim?.setParams(day, demandScale);
+  }
+
   setZoneOptions(o: ZoneOptions) {
     this.tools.zone = o;
   }
@@ -201,6 +207,7 @@ export class Plan2D implements WorldRenderer {
     this.sim?.dispose();
     // The plan view is the low-end path, so it uses the low agent budget.
     this.sim = new SimClient(world, region, PRESETS.low.maxAgents, seed, time);
+    this.sim.setParams(...this.simParams);
   }
 
   private buildPaths() {
