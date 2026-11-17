@@ -251,3 +251,14 @@ select.scenario { max-width: 150px; }
 @media (max-width: 600px) { .attribution { left: 8px; right: 8px; bottom: 1px; text-align: center; font-size: 10px; } }
 .beyond { left: 50%; transform: translateX(-50%); top: 112px; z-index: 8; padding: 8px 14px; font-size: 13px; color: var(--text); }
 .beyond b { color: var(--accent); }
+
+.ch-pick { width: 100%; margin-bottom: 12px; }
+.challenge { background: rgba(63, 211, 195, 0.08); border: 1px solid rgba(63, 211, 195, 0.3); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; }
+.challenge.done { background: rgba(63, 211, 195, 0.18); border-color: var(--accent); }
+.ch-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.challenge ul { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 4px; font-size: 12.5px; }
+.challenge li { display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; color: var(--muted); }
+.challenge li.met { color: var(--text); }
+.challenge li i { font-style: normal; color: var(--accent); }
+.challenge li b { font-weight: 600; }
+.ch-done { margin: 8px 0 0; color: var(--accent); font-weight: 600; font-size: 13px; }

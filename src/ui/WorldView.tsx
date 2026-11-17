@@ -16,6 +16,7 @@ import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
 import { Tour, type TourSignals } from './Tour';
+import { suggested } from './challenges';
 
 const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select & inspect', key: '1', icon: '➚' },
@@ -461,7 +462,11 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
+        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon}
+          challenge={project.challenge}
+          suggestedChallenge={suggested(project.place.name, project.place.countryCode)?.id}
+          onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
+          onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}
 
       <SimBar

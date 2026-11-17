@@ -5,6 +5,7 @@ import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
 import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats } from '../sim/simulation';
+import { CHALLENGES, evaluate } from './challenges';
 import type { CityMetrics } from './metrics';
 
 const USES: BuildingUse[] = ['residential', 'commercial', 'office', 'industrial', 'education', 'health', 'civic', 'religious', 'parking', 'unknown'];
@@ -195,7 +196,9 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0 }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string }) {
+  const ch = CHALLENGES.find((c) => c.id === challenge);
+  const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
     const d = a - b;
     if (Math.abs(d) < 10 ** -digits / 2) return null;
@@ -205,6 +208,29 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
   const shares = Object.entries(region.modeShare).sort((a, b) => b[1] - a[1]);
   return (
     <aside className="panel dashboard" aria-label="Urban impact dashboard">
+      {ch && result ? (
+        <div className={`challenge ${result.done ? 'done' : ''}`}>
+          <div className="ch-head">
+            <span>Challenge</span>
+            <button className="icon-btn" onClick={() => onChallenge(undefined)} aria-label="Leave challenge">Leave</button>
+          </div>
+          <strong>{ch.title}</strong>
+          <p className="note">{ch.brief}</p>
+          <ul>
+            {result.results.map((r) => (
+              <li key={r.label} className={r.met ? 'met' : ''}><i>{r.met ? '✓' : '○'}</i>{r.label}<b>{r.value}</b></li>
+            ))}
+          </ul>
+          {result.done && <p className="ch-done">Challenge complete — share your plan!</p>}
+        </div>
+      ) : (
+        <select className="ch-pick" value="" onChange={(e) => onChallenge(e.target.value)} aria-label="Take a challenge">
+          <option value="">🎯 Take a planning challenge…</option>
+          {[...CHALLENGES].sort((a, b) => +(b.id === suggestedChallenge) - +(a.id === suggestedChallenge)).map((c) => (
+            <option key={c.id} value={c.id}>{c.title}{c.id === suggestedChallenge ? ' (suggested here)' : ''}</option>
+          ))}
+        </select>
+      )}
       <h3>Urban impact</h3>
       <p className="note">{editCount ? `Proposal vs. today (${editCount} change${editCount === 1 ? '' : 's'})` : 'Today’s city — make a change to compare.'}</p>
       <div className="metrics">

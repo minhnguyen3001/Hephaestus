@@ -298,6 +298,21 @@ describe('zoning', () => {
   });
 });
 
+describe('challenges', () => {
+  it('evaluates goals against metrics', async () => {
+    const { CHALLENGES, evaluate, suggested } = await import('../ui/challenges');
+    const { cityMetrics } = await import('../ui/metrics');
+    const base = gridFixture();
+    const o = cityMetrics(base);
+    const housing = CHALLENGES.find((c) => c.id === 'housing')!;
+    expect(evaluate(housing, o, o, null).done).toBe(false);
+    const block: [number, number][] = [[-195, -195], [-105, -195], [-105, -105], [-195, -105]];
+    const grown = cityMetrics(applyEdits(base, [{ kind: 'zone', zone: { id: 'z', polygon: block, use: 'residential', density: 'high', replace: true } }]));
+    expect(evaluate(housing, grown, o, null).results[0].met).toBe(true);
+    expect(suggested('Chicago Loop', 'us')?.id).toBe('unjam');
+  });
+});
+
 describe('trees', () => {
   it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
     const { treePoints } = await import('../geo/trees');

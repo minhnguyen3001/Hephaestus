@@ -26,6 +26,7 @@ export interface Project {
   active?: string;
   view3d?: SavedView;
   view2d?: SavedView;
+  challenge?: string;
   createdAt: string;
   updatedAt: string;
 }
