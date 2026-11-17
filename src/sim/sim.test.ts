@@ -114,6 +114,24 @@ describe('scenario edits', () => {
   });
 });
 
+describe('proposed roads join the network', () => {
+  it('creates an intersection where a new road crosses a street, and a T-junction at its end', () => {
+    const base = gridFixture();
+    // Runs north–south between grid columns (x = -50), crossing every east–west street, ending on the y=200 street.
+    const road = { id: 'u-r-1', nodes: ['u-n-1-a', 'u-n-1-b'], points: [[-50, -230], [-50, 200]] as [number, number][], kind: 'tertiary' as const, lanes: 2, oneway: false, maxspeedKmh: 40, origin: 'proposed' as const };
+    const w = applyEdits(base, [{ kind: 'addRoad', road }]);
+    const added = w.roads.find((r) => r.id === 'u-r-1')!;
+    expect(added.points.length).toBe(2 + 4); // 4 crossings (y = -200..100); end on y=200 street is a T
+    expect(added.nodes[added.nodes.length - 1]).toMatch(/^t-/);
+    const g = RoadGraph.build(w.roads);
+    const from = g.index.get('u-n-1-a')!;
+    const to = g.index.get('n45')!;
+    expect(g.route(from, to, 'car')).not.toBeNull();
+    // base data untouched
+    expect(base.roads.every((r) => !r.nodes.some((n) => n.startsWith('x-')))).toBe(true);
+  });
+});
+
 describe('simulation', () => {
   it('has rush-hour peaks', () => {
     expect(demandAt(8.2)).toBeGreaterThan(0.9);
