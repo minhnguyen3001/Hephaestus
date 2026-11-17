@@ -113,6 +113,7 @@ export class Plan2D implements WorldRenderer {
   setLayers(l: Layers) {
     const restyle = l.estimated !== this.layers.estimated;
     this.layers = l;
+    this.version++;
     if (restyle) this.buildPaths();
   }
 
@@ -212,6 +213,7 @@ export class Plan2D implements WorldRenderer {
 
   private buildPaths() {
     const w = this.world!;
+    this.version++;
     const groups = new Map<string, Path2D>();
     this.bbox.clear();
     for (const b of w.buildings) {
@@ -312,6 +314,7 @@ export class Plan2D implements WorldRenderer {
     return [this.cx + (sx - rect.left - rect.width / 2) / this.scale, this.cy - (sy - rect.top - rect.height / 2) / this.scale];
   }
 
+  private busy = 0;
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
@@ -325,6 +328,7 @@ export class Plan2D implements WorldRenderer {
       if (a) [this.cx, this.cy] = [a.x, a.y];
     }
     this.draw();
+    this.busy += performance.now() - now;
     this.statsT += dt;
     this.perfT += dt;
     this.frames++;
@@ -334,11 +338,16 @@ export class Plan2D implements WorldRenderer {
       if (this.selected?.type === 'agent') this.refreshSelection();
     }
     if (this.perfT >= 1) {
-      this.cb.onPerf({ fps: this.frames / this.perfT, pixelRatio: 1, drawCalls: 0, triangles: 0, quality: 'low' });
+      this.cb.onPerf({ fps: this.frames / this.perfT, pixelRatio: 1, drawCalls: 0, triangles: 0, quality: 'low', frameMs: this.busy / Math.max(1, this.frames) });
+      this.busy = 0;
       this.perfT = 0;
       this.frames = 0;
     }
   };
+
+  private staticCanvas = document.createElement('canvas');
+  private staticKey = '';
+  private version = 0;
 
   private draw() {
     const ctx = this.ctx;
@@ -347,67 +356,22 @@ export class Plan2D implements WorldRenderer {
     const H = this.canvas.height;
     const hour = (this.sim?.time ?? 43200) / 3600;
     const night = hour < 6 || hour > 19.5 ? 1 : hour < 7 ? 7 - hour : hour > 18.5 ? hour - 18.5 : 0;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#cdc6b6';
-    ctx.fillRect(0, 0, W, H);
     const s = this.scale * dpr;
-    ctx.setTransform(s, 0, 0, -s, W / 2 - this.cx * s, H / 2 + this.cy * s);
     const px = 1 / this.scale; // one CSS pixel in meters
-    const w = this.world;
-    if (w) {
-      ctx.fillStyle = '#e6e0d3';
-      ctx.beginPath();
-      ctx.arc(0, 0, w.radius, 0, Math.PI * 2);
-      ctx.fill();
-      for (const a of this.areaPaths) {
-        ctx.fillStyle = a.color;
-        ctx.fill(a.path, 'evenodd');
+    // The map itself only changes when the view, data or layers change: cache it and just blit it.
+    const key = [this.cx, this.cy, this.scale, W, H, this.version, this.sim?.infoVersion, this.layers.traffic ? this.sim?.speedVersion : 0].join('|');
+    if (key !== this.staticKey) {
+      this.staticKey = key;
+      if (this.staticCanvas.width !== W || this.staticCanvas.height !== H) {
+        this.staticCanvas.width = W;
+        this.staticCanvas.height = H;
       }
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      for (const r of this.roadPaths) {
-        ctx.strokeStyle = r.color;
-        ctx.lineWidth = Math.max(r.width, px);
-        ctx.stroke(r.path);
-      }
-      if (this.layers.traffic && this.sim) {
-        for (const [id, r] of this.sim.roadSpeed) {
-          const road = this.roadById.get(id);
-          if (!road) continue;
-          ctx.strokeStyle = `#${trafficColor(r).getHexString()}`;
-          ctx.lineWidth = Math.max(road.width * 0.8, 2 * px);
-          ctx.stroke(road.path);
-        }
-      }
-      ctx.setLineDash([4 * px, 3 * px]);
-      ctx.strokeStyle = '#5b5450';
-      ctx.lineWidth = Math.max(2.4, 1.5 * px);
-      ctx.stroke(this.railPath);
-      ctx.setLineDash([]);
-      for (const f of this.fills) {
-        ctx.fillStyle = f.color;
-        ctx.fill(f.path);
-      }
-      if (this.layers.trees && this.scale > 0.35) {
-        ctx.fillStyle = 'rgba(79,122,69,0.85)';
-        ctx.fill(this.treePath);
-      }
-      if (this.scale > 0.6) {
-        ctx.strokeStyle = 'rgba(60,50,40,0.35)';
-        ctx.lineWidth = px;
-        for (const f of this.fills) ctx.stroke(f.path);
-      }
-      if (this.layers.transit && this.sim && this.region) {
-        ctx.globalAlpha = 0.6;
-        for (const l of this.sim.info.lines) {
-          ctx.strokeStyle = hex(l.color);
-          ctx.lineWidth = l.mode === 'metro' ? Math.max(4, 3 * px) : Math.max(l.generated ? 1.2 : 2, 2 * px);
-          ctx.stroke(this.linePath(l.pts));
-        }
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = hex(this.region.busColor);
-        for (const [x, y] of this.sim.info.stops) ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
-      }
+      this.drawStatic(this.staticCanvas.getContext('2d')!, W, H, s, px);
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.staticCanvas, 0, 0);
+    ctx.setTransform(s, 0, 0, -s, W / 2 - this.cx * s, H / 2 + this.cy * s);
+    if (this.world) {
       if (this.sim && this.scale > 0.7) {
         for (const h of this.sim.info.signals) {
           const st = signalPhase(this.sim.time, h.offset, h.group);
@@ -450,6 +414,68 @@ export class Plan2D implements WorldRenderer {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = `rgba(11,19,34,${0.45 * Math.min(1, night)})`;
       ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  private drawStatic(ctx: CanvasRenderingContext2D, W: number, H: number, s: number, px: number) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#cdc6b6';
+    ctx.fillRect(0, 0, W, H);
+    ctx.setTransform(s, 0, 0, -s, W / 2 - this.cx * s, H / 2 + this.cy * s);
+    const w = this.world;
+    if (!w) return;
+    ctx.fillStyle = '#e6e0d3';
+    ctx.beginPath();
+    ctx.arc(0, 0, w.radius, 0, Math.PI * 2);
+    ctx.fill();
+    for (const a of this.areaPaths) {
+      ctx.fillStyle = a.color;
+      ctx.fill(a.path, 'evenodd');
+    }
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const r of this.roadPaths) {
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = Math.max(r.width, px);
+      ctx.stroke(r.path);
+    }
+    if (this.layers.traffic && this.sim) {
+      for (const [id, r] of this.sim.roadSpeed) {
+        const road = this.roadById.get(id);
+        if (!road) continue;
+        ctx.strokeStyle = `#${trafficColor(r).getHexString()}`;
+        ctx.lineWidth = Math.max(road.width * 0.8, 2 * px);
+        ctx.stroke(road.path);
+      }
+    }
+    ctx.setLineDash([4 * px, 3 * px]);
+    ctx.strokeStyle = '#5b5450';
+    ctx.lineWidth = Math.max(2.4, 1.5 * px);
+    ctx.stroke(this.railPath);
+    ctx.setLineDash([]);
+    for (const f of this.fills) {
+      ctx.fillStyle = f.color;
+      ctx.fill(f.path);
+    }
+    if (this.layers.trees && this.scale > 0.35) {
+      ctx.fillStyle = 'rgba(79,122,69,0.85)';
+      ctx.fill(this.treePath);
+    }
+    if (this.scale > 0.6) {
+      ctx.strokeStyle = 'rgba(60,50,40,0.35)';
+      ctx.lineWidth = px;
+      for (const f of this.fills) ctx.stroke(f.path);
+    }
+    if (this.layers.transit && this.sim && this.region) {
+      ctx.globalAlpha = 0.6;
+      for (const l of this.sim.info.lines) {
+        ctx.strokeStyle = hex(l.color);
+        ctx.lineWidth = l.mode === 'metro' ? Math.max(4, 3 * px) : Math.max(l.generated ? 1.2 : 2, 2 * px);
+        ctx.stroke(this.linePath(l.pts));
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = hex(this.region.busColor);
+      for (const [x, y] of this.sim.info.stops) ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
     }
   }
 

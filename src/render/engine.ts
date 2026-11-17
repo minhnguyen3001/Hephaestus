@@ -35,6 +35,8 @@ export interface Perf {
   drawCalls: number;
   triangles: number;
   quality: Quality;
+  /** Average main-thread milliseconds per frame spent in our loop (simulation sync + scene update + render submit). */
+  frameMs: number;
 }
 
 /** What the UI needs from any world view (3D engine or 2D plan). */
@@ -751,9 +753,11 @@ export class Engine implements WorldRenderer {
 
   // ---------- per frame ----------
 
+  private busy = 0;
   private loop = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
+    const start = performance.now();
     const raw = this.clock.getDelta();
     const dt = Math.min(0.1, raw);
     // Simulation runs on wall-clock time so a slow GPU never slows the city down (capped after tab switches).
@@ -767,6 +771,7 @@ export class Engine implements WorldRenderer {
     if (this.camera.position.y < floor) this.camera.position.y = floor;
     this.updateSky();
     this.renderer.render(this.scene, this.camera);
+    this.busy += performance.now() - start;
     this.trackPerf(dt);
   };
 
@@ -914,6 +919,8 @@ export class Engine implements WorldRenderer {
     }
     if (this.perfT < 1) return;
     const fps = this.frames / this.perfT;
+    const frameMs = this.busy / Math.max(1, this.frames);
+    this.busy = 0;
     this.frames = 0;
     this.perfT = 0;
     if (this.qualitySetting === 'auto' && !document.hidden) {
@@ -936,7 +943,7 @@ export class Engine implements WorldRenderer {
       }
     }
     const info = this.renderer.info.render;
-    this.cb.onPerf({ fps, pixelRatio: this.pixelRatio, drawCalls: info.calls, triangles: info.triangles, quality: this.quality });
+    this.cb.onPerf({ fps, pixelRatio: this.pixelRatio, drawCalls: info.calls, triangles: info.triangles, quality: this.quality, frameMs });
   }
 
   private resize() {

@@ -15,6 +15,9 @@ export class SimClient {
   info: { lines: TransitLineView[]; stops: Vec2[]; signals: SignalHead[] } = { lines: [], stops: [], signals: [] };
   /** Smoothed speed ratio per road id (1 = free flow), for the traffic layer. */
   roadSpeed = new Map<string, number>();
+  /** Bumped when transit info / road speeds change, so views can cache static layers. */
+  infoVersion = 0;
+  speedVersion = 0;
   private frameNo = 0;
   onInfo?: () => void;
   private worker: Worker | null = null;
@@ -68,6 +71,7 @@ export class SimClient {
   private receive(m: Frame | Info) {
     if (m.t === 'info') {
       this.info = { lines: m.lines, stops: m.stops, signals: m.signals };
+      this.infoVersion++;
       this.onInfo?.();
       return;
     }
@@ -78,6 +82,7 @@ export class SimClient {
     this.stats = m.stats;
     this.watchedInfo = m.watched;
     if (m.speeds) {
+      this.speedVersion++;
       const seen = new Set(m.speeds.ids);
       m.speeds.ids.forEach((id, i) => this.roadSpeed.set(id, 0.6 * (this.roadSpeed.get(id) ?? m.speeds!.ratio[i]) + 0.4 * m.speeds!.ratio[i]));
       // roads that emptied drift back toward free flow
