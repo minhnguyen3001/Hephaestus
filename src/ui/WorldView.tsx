@@ -11,7 +11,7 @@ import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
 import { makeProjection } from '../geo/util';
 import { profileFor } from '../sim/region';
-import type { DayType, SimStats } from '../sim/simulation';
+import type { DayType, SimStats, Weather } from '../sim/simulation';
 import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
@@ -26,7 +26,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'bulldoze', label: 'Bulldoze', key: '4', icon: '✕' },
   { id: 'transit', label: 'Transit line', key: '5', icon: '⇆' },
   { id: 'zone', label: 'Zone area', key: '6', icon: '▣' },
-  { id: 'note', label: 'Add note', key: '7', icon: '✎' },
+  { id: 'note', label: 'Note pin', key: '7', icon: '✎' },
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
@@ -73,6 +73,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [lineMode, setLineMode] = useState<'bus' | 'metro'>('bus');
   const [day, setDay] = useState<DayType>('weekday');
   const [horizon, setHorizon] = useState(0);
+  const [weather, setWeather] = useState<Weather>('clear');
   const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -189,7 +190,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
   useEffect(() => engine.current?.setLineMode(lineMode), [lineMode, quality, mode]);
   useEffect(() => engine.current?.setZoneOptions(zoneOpts), [zoneOpts, quality, mode]);
-  useEffect(() => engine.current?.setSimParams(day, (1 + region.growth) ** horizon), [day, horizon, region, quality, mode]);
+  useEffect(() => engine.current?.setSimParams(day, (1 + region.growth) ** horizon, weather), [day, horizon, weather, region, quality, mode]);
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
@@ -501,7 +502,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           if (stats) setStats({ ...stats, time: t });
         }}
         onReset={() => engine.current?.resetSim()}
-        day={day} onDay={setDay} horizon={horizon} onHorizon={setHorizon} growth={region.growth}
+        day={day} onDay={setDay} horizon={horizon} onHorizon={setHorizon} growth={region.growth} weather={weather} onWeather={setWeather}
       />
 
       {tool === 'transit' && editable && (

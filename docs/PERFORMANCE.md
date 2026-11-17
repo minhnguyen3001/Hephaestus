@@ -23,6 +23,8 @@ Headless Chromium, **software rendering (SwiftShader, no GPU)**, **4× CPU throt
 
 Accessibility metrics and the advisor use grid-based proximity lookups. Earlier O(homes × stops) scans caused 100+ ms spikes in dense cities.
 
+Note: under software rendering, `frameMs` can also include GPU back-pressure. When the emulated GPU falls behind, `render()` blocks, so dense cities at High quality can show large values in headless runs. Low quality and the 2D view stay in the low single digits.
+
 How to read this: our JavaScript per frame is tiny, even on a throttled CPU. The fps cap in headless runs comes from software rasterisation and compositing, not from the app. On a real integrated GPU, rendering cost is dominated by the GPU, and the scene uses only a few dozen draw calls thanks to merged and instanced geometry.
 
 Simulation (Node, unthrottled): worst tick 37 ms for 900 agents in Shibuya at 850 m. It runs in a Web Worker, so it never blocks rendering. The simulation advances on wall-clock time, so a slow GPU doesn't slow the city.

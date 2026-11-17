@@ -5,7 +5,7 @@ import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
-import { signalPhase, type DayType } from '../sim/simulation';
+import { signalPhase, type DayType, type Weather } from '../sim/simulation';
 import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
 import { PRESETS } from './quality';
@@ -179,11 +179,13 @@ export class Plan2D implements WorldRenderer {
     return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
-  private simParams: [DayType, number] = ['weekday', 1];
-  setSimParams(day: DayType, demandScale: number) {
-    this.simParams = [day, demandScale];
-    this.sim?.setParams(day, demandScale);
+  private simParams: [DayType, number, Weather] = ['weekday', 1, 'clear'];
+  setSimParams(day: DayType, demandScale: number, weather: Weather) {
+    this.simParams = [day, demandScale, weather];
+    this.sim?.setParams(day, demandScale, weather);
+    this.weather = weather;
   }
+  private weather: Weather = 'clear';
 
   setZoneOptions(o: ZoneOptions) {
     this.tools.zone = o;
@@ -425,6 +427,11 @@ export class Plan2D implements WorldRenderer {
     if (night > 0) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = `rgba(11,19,34,${0.45 * Math.min(1, night)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    if (this.weather !== 'clear') {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = this.weather === 'snow' ? 'rgba(240,244,248,0.25)' : this.weather === 'fog' ? 'rgba(200,205,210,0.35)' : 'rgba(90,105,125,0.18)';
       ctx.fillRect(0, 0, W, H);
     }
     // notes in screen space so text stays readable

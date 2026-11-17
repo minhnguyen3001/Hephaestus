@@ -11,7 +11,7 @@ import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
 import type { AgentView } from '../sim/protocol';
-import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type DayType, type SimStats } from '../sim/simulation';
+import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type DayType, type SimStats, type Weather } from '../sim/simulation';
 
 export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
@@ -58,7 +58,7 @@ export interface WorldRenderer {
   setLineMode(m: 'bus' | 'metro'): void;
   getView(): SavedView;
   setView(v: SavedView): void;
-  setSimParams(day: DayType, demandScale: number): void;
+  setSimParams(day: DayType, demandScale: number, weather: Weather): void;
   lookAt(p: Vec2): void;
   roadSpeeds(): Map<string, number>;
   dispose(): void;
@@ -776,10 +776,50 @@ export class Engine implements WorldRenderer {
     return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
-  private simParams: [DayType, number] = ['weekday', 1];
-  setSimParams(day: DayType, demandScale: number) {
-    this.simParams = [day, demandScale];
-    this.sim?.setParams(day, demandScale);
+  private simParams: [DayType, number, Weather] = ['weekday', 1, 'clear'];
+  private weather: Weather = 'clear';
+  private precip?: THREE.LineSegments | THREE.Points;
+  private setWeather(w: Weather) {
+    this.weather = w;
+    if (this.precip) {
+      this.scene.remove(this.precip);
+      this.precip.geometry.dispose();
+      this.precip = undefined;
+    }
+    if (w !== 'rain' && w !== 'snow') return;
+    const n = { low: 1200, medium: 3000, high: 6000 }[this.quality];
+    const pos = new Float32Array(n * (w === 'rain' ? 6 : 3));
+    for (let i = 0; i < n; i++) {
+      const x = (Math.random() - 0.5) * 400;
+      const y = Math.random() * 160;
+      const z = (Math.random() - 0.5) * 400;
+      if (w === 'rain') pos.set([x, y, z, x + 0.3, y - 2.2, z], i * 6);
+      else pos.set([x, y, z], i * 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.precip = w === 'rain'
+      ? new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xaab8c8, transparent: true, opacity: 0.45 }))
+      : new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, transparent: true, opacity: 0.85 }));
+    this.precip.frustumCulled = false;
+    this.scene.add(this.precip);
+  }
+
+  private updateWeather(dt: number) {
+    const p = this.precip;
+    if (!p) return;
+    // particles live in a box around the camera target; the box scrolls down and wraps
+    const t = this.controls.target;
+    const fall = (this.weather === 'rain' ? 60 : 4) * dt;
+    p.position.x = t.x;
+    p.position.z = t.z;
+    p.position.y = ((p.position.y - fall) % 160 + 160) % 160 + t.y - 160;
+    if (this.weather === 'snow') p.rotation.y += dt * 0.05;
+  }
+  setSimParams(day: DayType, demandScale: number, weather: Weather) {
+    this.simParams = [day, demandScale, weather];
+    this.sim?.setParams(day, demandScale, weather);
+    this.setWeather(weather);
   }
 
   setZoneOptions(o: ZoneOptions) {
@@ -906,6 +946,7 @@ export class Engine implements WorldRenderer {
     this.updateAgents();
     this.updateSignals();
     this.updateTraffic(dt);
+    this.updateWeather(dt);
     this.updateCamera(dt);
     this.controls.update();
     const floor = this.h(this.camera.position.x, -this.camera.position.z) + 1.5;
@@ -1054,13 +1095,16 @@ export class Engine implements WorldRenderer {
     this.hemi.intensity = 0.25 + 0.75 * day;
     this.night.value = 1 - day;
     const bg = SKY_NIGHT.clone().lerp(SKY_DAY, day).lerp(SKY_DUSK, dusk * 0.55);
+    if (this.weather !== 'clear') bg.lerp(new THREE.Color(this.weather === 'snow' ? 0xdfe5ea : 0x8d97a3), 0.6 * day + 0.2);
     this.scene.background = bg;
     const fog = this.scene.fog as THREE.Fog;
     fog.color.copy(bg);
     // Haze starts beyond what the camera is looking at, so aerial views stay crisp.
     const d = this.camera.position.distanceTo(this.controls.target);
-    fog.near = d + (this.world?.radius ?? 600) * 1.2;
-    fog.far = fog.near + (this.world?.radius ?? 600) * 6;
+    const haze = this.weather === 'fog' ? 0.12 : this.weather === 'clear' ? 1 : 0.45;
+    fog.near = (d + (this.world?.radius ?? 600) * 1.2) * haze;
+    fog.far = fog.near + (this.world?.radius ?? 600) * 6 * haze;
+    this.sun.intensity *= this.weather === 'clear' ? 1 : 0.55;
   }
 
   private trackPerf(dt: number) {

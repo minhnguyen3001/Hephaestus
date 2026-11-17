@@ -243,6 +243,20 @@ describe('simulation', () => {
     expect(plain.stats().lines.some((l) => l.id === 'osm-rail-0')).toBe(false);
   });
 
+  it('bad weather slows traffic and moves trips off foot and bike', () => {
+    const run = (weather: 'clear' | 'snow') => {
+      const sim = new Simulation(gridFixture(600), profileFor('nl'), 300, 13);
+      sim.weather = weather;
+      sim.step(300);
+      const st = sim.stats();
+      return { walkBike: st.active.pedestrian + st.active.bicycle, speed: st.avgVehicleSpeedKmh };
+    };
+    const clear = run('clear');
+    const snow = run('snow');
+    expect(snow.walkBike).toBeLessThan(clear.walkBike);
+    expect(snow.speed).toBeLessThan(clear.speed);
+  });
+
   it('dispatches emergency vehicles from hospitals and civic buildings', () => {
     const w = gridFixture();
     w.buildings[0] = { ...w.buildings[0], use: 'health', name: 'General Hospital' };

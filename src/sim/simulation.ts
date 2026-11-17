@@ -219,6 +219,8 @@ const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus' | 'emergen
 const isVehicle = (k: AgentKind) => k !== 'pedestrian' && k !== 'bicycle';
 
 export type DayType = 'weekday' | 'weekend';
+export type Weather = 'clear' | 'rain' | 'snow' | 'fog';
+const WEATHER_SPEED: Record<Weather, number> = { clear: 1, rain: 0.85, snow: 0.65, fog: 0.85 };
 
 /** Daily travel-demand curve in [0,1]. Weekdays: AM/PM commute peaks; weekends: one broad leisure peak. */
 export function demandAt(hour: number, day: DayType = 'weekday'): number {
@@ -276,6 +278,7 @@ export class Simulation {
   day: DayType = 'weekday';
   /** Multiplier on travel demand (timeline projections). Capped to protect frame rate. */
   demandScale = 1;
+  weather: Weather = 'clear';
 
   constructor(world: WorldData, readonly region: RegionProfile, public maxAgents = 400, seed = 1) {
     this.rand = rng(seed);
@@ -641,6 +644,17 @@ export class Simulation {
 
   private chooseMode(d: number, hasStops: boolean): TravelMode {
     const w = { ...this.region.modeShare };
+    if (this.weather === 'rain' || this.weather === 'snow') {
+      // bad weather pushes trips from walking/cycling to transit and cars
+      const f = this.weather === 'snow' ? 0.35 : 0.55;
+      const moved = (w.walk + w.bicycle + w.motorcycle) * (1 - f);
+      w.walk *= f;
+      w.bicycle *= f;
+      w.motorcycle *= f;
+      w.bus += moved * 0.5;
+      w.car += moved * 0.35;
+      w.taxi += moved * 0.15;
+    }
     w.walk *= d < 400 ? 8 : d < 1000 ? 2 : d > 2500 ? 0.1 : 1;
     w.bicycle *= d < 300 ? 0.3 : 1;
     if (!hasStops || d < 300) w.bus = 0;
@@ -886,7 +900,7 @@ export class Simulation {
     if (stopHere !== undefined) gap = Math.min(gap, toEnd + 1.5);
 
     const spec = VEHICLE[a.kind as keyof typeof VEHICLE];
-    const vDesired = e.speed * a.vmax;
+    const vDesired = e.speed * a.vmax * WEATHER_SPEED[this.weather];
     const vSafe = gap === Infinity ? Infinity : Math.max(0, (gap - 1.5) / 1.1);
     const vTarget = Math.min(vDesired, vSafe);
     a.v = Math.max(0, Math.min(vTarget, a.v + spec.acc * dt));

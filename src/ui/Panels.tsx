@@ -4,7 +4,7 @@ import { signedArea } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
-import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats } from '../sim/simulation';
+import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats, type Weather } from '../sim/simulation';
 import type { Note, Vec2 } from '../geo/types';
 import type { Insight } from './advisor';
 import { CHALLENGES, evaluate } from './challenges';
@@ -154,7 +154,7 @@ function AgentInspector({ a, following, onFollow }: { a: AgentInfo; following: b
 }
 
 export function SimBar({
-  stats, running, speed, onRun, onSpeed, onTime, onReset, day, onDay, horizon, onHorizon, growth,
+  stats, running, speed, onRun, onSpeed, onTime, onReset, day, onDay, horizon, onHorizon, growth, weather, onWeather,
 }: {
   stats: SimStats | null;
   running: boolean;
@@ -168,6 +168,8 @@ export function SimBar({
   horizon: number;
   onHorizon: (y: number) => void;
   growth: number;
+  weather: Weather;
+  onWeather: (w: Weather) => void;
 }) {
   const t = stats?.time ?? 0;
   const hh = String(Math.floor(t / 3600)).padStart(2, '0');
@@ -185,6 +187,12 @@ export function SimBar({
       <select value={day} onChange={(e) => onDay(e.target.value as DayType)} aria-label="Day type" className="hide-sm">
         <option value="weekday">Weekday</option>
         <option value="weekend">Weekend</option>
+      </select>
+      <select value={weather} onChange={(e) => onWeather(e.target.value as Weather)} aria-label="Weather" className="hide-sm">
+        <option value="clear">☀ Clear</option>
+        <option value="rain">🌧 Rain</option>
+        <option value="snow">❄ Snow</option>
+        <option value="fog">🌫 Fog</option>
       </select>
       <select value={horizon} onChange={(e) => onHorizon(+e.target.value)} aria-label="Timeline" className="hide-sm"
         title={`Projection assumes travel demand grows ${(growth * 100).toFixed(1)}% per year. Illustrative, not a forecast.`}>

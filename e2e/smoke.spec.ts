@@ -279,7 +279,7 @@ test('pin a note and see it travel in a share link', async ({ page, context }) =
   await page.goto('/');
   await page.getByRole('button', { name: /Shibuya/ }).click();
   await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
-  await page.getByRole('button', { name: 'Add note' }).click();
+  await page.getByRole('button', { name: 'Note pin' }).click();
   const box = (await page.locator('.viewport canvas').boundingBox())!;
   await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.55);
   await expect(page.locator('.notes')).toContainText('Protected bike lane here');
@@ -290,4 +290,20 @@ test('pin a note and see it travel in a share link', async ({ page, context }) =
   const other = await context.newPage();
   await other.goto(url);
   await expect(other.locator('.notes')).toContainText('Protected bike lane here', { timeout: 30_000 });
+});
+
+test('weather changes the scene', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByLabel('Weather').selectOption('rain');
+  await page.getByRole('button', { name: 'Street' }).click();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: 'test-results/22-rain.png' });
+  await page.getByLabel('Weather').selectOption('snow');
+  await page.getByRole('button', { name: 'District' }).click();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: 'test-results/23-snow.png' });
 });
