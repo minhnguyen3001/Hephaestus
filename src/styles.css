@@ -220,7 +220,7 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .linebar { top: auto; bottom: 236px; } }
 
 select.scenario { max-width: 150px; }
-.share { background: rgba(63, 211, 195, 0.15); border-color: rgba(63, 211, 195, 0.4); color: var(--accent); font-weight: 600; }
+.share { flex: none; width: auto; padding: 7px 14px; background: rgba(63, 211, 195, 0.15); border-color: rgba(63, 211, 195, 0.4); color: var(--accent); font-weight: 600; }
 .compare-wrap { overflow-x: auto; }
 .compare { border-collapse: collapse; font-size: 12px; width: 100%; }
 .compare th, .compare td { padding: 4px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }

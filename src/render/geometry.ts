@@ -224,6 +224,21 @@ export function agentGeometry(kind: string): THREE.BufferGeometry {
       return mergeGeometries([box(3, 3.4, 1, 0.5), box(2.6, 0.3, 0.8, 3.9)])!;
     case 'pillar':
       return box(1.2, 1, 1.2, 0);
+    case 'tree': {
+      // trunk + two-lobe canopy, coloured per vertex (instance colour tints it)
+      const paint = (g: THREE.BufferGeometry, hexc: number) => {
+        const ng = g.toNonIndexed();
+        const c = new THREE.Color(hexc);
+        ng.setAttribute('color', new THREE.Float32BufferAttribute(new Array(ng.attributes.position.count).fill(0).flatMap(() => [c.r, c.g, c.b]), 3));
+        ng.deleteAttribute('uv');
+        return ng;
+      };
+      return mergeGeometries([
+        paint(new THREE.CylinderGeometry(0.16, 0.24, 2.6, 5).translate(0, 1.3, 0), 0x8a6a4c),
+        paint(new THREE.IcosahedronGeometry(2.3, 0).translate(0, 4, 0), 0xffffff),
+        paint(new THREE.IcosahedronGeometry(1.6, 0).translate(0.6, 5.4, 0.3), 0xf0f0f0),
+      ])!;
+    }
     default: // car, taxi
       return mergeGeometries([box(1.85, 0.75, 4.5, 0.3), box(1.65, 0.6, 2.4, 1.05, -0.2)])!;
   }

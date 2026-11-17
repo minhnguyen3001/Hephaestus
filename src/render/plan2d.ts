@@ -1,5 +1,6 @@
 import type { Building, Road, Vec2, WorldData } from '../geo/types';
 import type { SavedView } from '../project/store';
+import { treePoints } from '../geo/trees';
 import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
@@ -41,7 +42,8 @@ export class Plan2D implements WorldRenderer {
   private cx = 0;
   private cy = 0;
   private scale = 1; // px per meter
-  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true };
+  private treePath = new Path2D();
   private roadById = new Map<string, { path: Path2D; width: number }>();
   private fills: { color: string; path: Path2D }[] = [];
   private roadPaths: { width: number; color: string; path: Path2D }[] = [];
@@ -241,6 +243,11 @@ export class Plan2D implements WorldRenderer {
       for (const h of a.holes ?? []) path.addPath(this.polyPath(h));
       return { color: hex(AREA_COLORS[a.kind]), path };
     });
+    this.treePath = new Path2D();
+    for (const t of treePoints(w, 4000)) {
+      this.treePath.moveTo(t.p[0] + 2.4 * t.scale, t.p[1]);
+      this.treePath.arc(t.p[0], t.p[1], 2.4 * t.scale, 0, Math.PI * 2);
+    }
     this.railPath = new Path2D();
     for (const r of w.rails) if (!r.tunnel) this.railPath.addPath(this.linePath(r.points));
   }
@@ -369,6 +376,10 @@ export class Plan2D implements WorldRenderer {
       for (const f of this.fills) {
         ctx.fillStyle = f.color;
         ctx.fill(f.path);
+      }
+      if (this.layers.trees && this.scale > 0.35) {
+        ctx.fillStyle = 'rgba(79,122,69,0.85)';
+        ctx.fill(this.treePath);
       }
       if (this.scale > 0.6) {
         ctx.strokeStyle = 'rgba(60,50,40,0.35)';

@@ -3,7 +3,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Area, Building, Road, Vec2, WorldData } from '../geo/types';
 import { sampleTerrain } from '../geo/terrain';
-import { centroid, dist } from '../geo/util';
+import { treePoints } from '../geo/trees';
+import { centroid, dist, hash01 } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { SavedView } from '../project/store';
 import { roadWidth } from '../sim/graph';
@@ -69,6 +70,7 @@ export interface Layers {
   transit: boolean;
   estimated: boolean;
   traffic: boolean;
+  trees: boolean;
 }
 
 const FREE = new THREE.Color(0x3cb371);
@@ -144,7 +146,8 @@ export class Engine implements WorldRenderer {
   private fastSeconds = 0;
   private quality: Quality;
   private pixelRatio: number;
-  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true };
+  private treeMesh?: THREE.InstancedMesh;
   private trafficT = 0;
   private signalPoles?: THREE.InstancedMesh;
   private signalLights?: THREE.InstancedMesh;
@@ -255,6 +258,7 @@ export class Engine implements WorldRenderer {
     this.layers = l;
     this.transitGroup.visible = l.transit;
     if (trafficOff) this.roads?.paint(() => null);
+    if (this.treeMesh) this.treeMesh.visible = l.trees;
     this.trafficT = 99;
     if (restyle && this.world) this.buildStatic();
   }
@@ -479,6 +483,22 @@ export class Engine implements WorldRenderer {
       pm.castShadow = shadows;
       this.worldGroup.add(pm);
     }
+
+    const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[this.quality]);
+    if (trees.length) {
+      const tm = new THREE.InstancedMesh(agentGeometry('tree'), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), trees.length);
+      const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
+      trees.forEach((t, i) => {
+        const [x, y] = t.p;
+        this.tmpM.makeRotationY(hash01(`${x}`) * 6.28).scale(new THREE.Vector3(t.scale, t.scale * (0.9 + hash01(`${y}`) * 0.3), t.scale)).setPosition(x, this.h(x, y) + lift, -y);
+        tm.setMatrixAt(i, this.tmpM);
+        tm.setColorAt(i, this.tmpC.setHex(greens[i % greens.length]));
+      });
+      tm.castShadow = shadows;
+      tm.visible = this.layers.trees;
+      this.treeMesh = tm;
+      this.worldGroup.add(tm);
+    } else this.treeMesh = undefined;
 
     const style: BuildingStyle = { highlightEstimated: this.layers.estimated };
     this.buildings = new PickMesh(

@@ -220,6 +220,21 @@ describe('simulation', () => {
   });
 });
 
+describe('trees', () => {
+  it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
+    const { treePoints } = await import('../geo/trees');
+    const w = gridFixture();
+    w.trees = [[1, 1], [2, 2]];
+    w.areas = [{ id: 'park1', kind: 'park', polygon: [[0, 0], [100, 0], [100, 100], [0, 100]] }];
+    const t = treePoints(w, 1000);
+    expect(t.filter((x) => x.mapped)).toHaveLength(2);
+    const planted = t.filter((x) => !x.mapped);
+    expect(planted.length).toBeGreaterThan(20);
+    for (const x of planted) expect(x.p[0] >= 0 && x.p[0] <= 100 && x.p[1] >= 0 && x.p[1] <= 100).toBe(true);
+    expect(treePoints(w, 1000)).toEqual(t); // deterministic
+  });
+});
+
 describe('terrain', () => {
   it('decodes Terrarium pixels and maps tiles', async () => {
     const { decodeTerrarium, lonLatToTile } = await import('../geo/terrain');

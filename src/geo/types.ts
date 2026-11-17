@@ -100,6 +100,7 @@ export interface WorldData {
   areas: Area[];
   rails: Rail[];
   signalNodes: string[]; // OSM nodes tagged highway=traffic_signals
+  trees?: Vec2[]; // OSM natural=tree nodes (mapped individual trees)
   fetchedAt: string;
   source: string;
   terrain?: Terrain; // undefined = flat (no DEM or loading failed)

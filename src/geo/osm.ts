@@ -39,6 +39,7 @@ out geom;`;
   way["leisure"~"^(park|garden|pitch|playground)$"]${a};
   way["natural"="wood"]${a};
   way["natural"="coastline"](around:${Math.round(radius * 2)},${ll});
+  node["natural"="tree"]${a};
   relation["type"="multipolygon"]["natural"~"^(water|wood)$"]${a}(if:count_members() < 500);
   relation["type"="multipolygon"]["waterway"="riverbank"]${a}(if:count_members() < 500);
   relation["type"="multipolygon"]["leisure"~"^(park|garden)$"]${a}(if:count_members() < 500);
@@ -50,6 +51,8 @@ out geom;`;
 interface OsmElement {
   type: 'way' | 'node' | 'relation';
   id: number;
+  lat?: number;
+  lon?: number;
   members?: { type: string; role: string; geometry?: { lat: number; lon: number }[] }[];
   nodes?: number[];
   geometry?: { lat: number; lon: number }[];
@@ -153,6 +156,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   const areas: Area[] = [];
   const rails: Rail[] = [];
   const signalNodes: string[] = [];
+  const trees: Vec2[] = [];
   const coast: Vec2[][] = [];
   const E = radius * 1.3; // everything area-like is clipped to this square (matches the terrain extent)
 
@@ -172,6 +176,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
     const tags = el.tags ?? {};
     if (el.type === 'node') {
       if (tags.highway === 'traffic_signals') signalNodes.push(`n${el.id}`);
+      else if (tags.natural === 'tree' && el.lat !== undefined && el.lon !== undefined) trees.push(proj.toLocal(el.lat, el.lon));
       continue;
     }
     if (el.type === 'relation') {
@@ -265,7 +270,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   }
 
   return {
-    center, radius, buildings, roads, areas, rails, signalNodes,
+    center, radius, buildings, roads, areas, rails, signalNodes, trees,
     fetchedAt: new Date().toISOString(),
     source: 'OpenStreetMap (Overpass API)',
   };
@@ -306,6 +311,7 @@ export function slimElements(elements: unknown[]): OsmElement[] {
     id: e.id,
     ...(e.nodes ? { nodes: e.nodes } : {}),
     ...(e.geometry ? { geometry: e.geometry.map(r6) } : {}),
+    ...(e.lat !== undefined && e.lon !== undefined ? r6({ lat: e.lat, lon: e.lon }) : {}),
     ...(e.members ? { members: e.members.filter((m) => m.type === 'way').map((m) => ({ type: m.type, role: m.role, geometry: m.geometry?.map(r6) })) } : {}),
     ...(e.tags ? { tags: Object.fromEntries(Object.entries(e.tags).filter(([k]) => KEEP_TAGS.has(k))) } : {}),
   }));
@@ -367,8 +373,12 @@ export async function fetchWorld(center: LatLon, radius: number, signal?: AbortS
 }
 
 /** Load water, parks and coastline-derived sea. Optional: callers should keep going if this fails. */
-export async function fetchAreas(center: LatLon, radius: number, signal?: AbortSignal) {
+export async function fetchAreas(center: LatLon, radius: number, signal?: AbortSignal): Promise<Pick<WorldData, 'areas' | 'trees'>> {
   const pack = await loadPack(center, radius);
-  if (pack) return parseOverpass({ elements: pack.extras }, center, radius).areas;
-  return parseOverpass(await overpass(buildOverpassQuery(center, radius, 'extras'), signal), center, radius).areas;
+  if (pack) {
+    const w = parseOverpass({ elements: pack.extras }, center, radius);
+    return { areas: w.areas, trees: w.trees };
+  }
+  const w = parseOverpass(await overpass(buildOverpassQuery(center, radius, 'extras'), signal), center, radius);
+  return { areas: w.areas, trees: w.trees };
 }
