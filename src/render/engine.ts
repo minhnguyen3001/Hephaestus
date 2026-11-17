@@ -292,7 +292,7 @@ export class Engine implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
+    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
     if (!this.sim || sig !== this.roadSignature || region !== this.region) {
       this.startSim(world, region, 1);
       this.roadSignature = sig;
@@ -649,6 +649,15 @@ export class Engine implements WorldRenderer {
         if (g) routes.push(g);
         continue;
       }
+      if (l.real) {
+        // mapped rail: tracks are already drawn; mark stations with platforms at the line's level
+        const y = l.level === 'under' ? -UNDER : l.level === 'elevated' ? 6.4 : this.lift;
+        l.stops.forEach((p, i) => {
+          const q = l.stops[i + 1] ?? l.stops[i - 1];
+          platforms.push(new THREE.Matrix4().makeRotationY(Math.atan2(q[0] - p[0], -(q[1] - p[1]))).setPosition(p[0], this.hp(p) + y, -p[1]));
+        });
+        continue;
+      }
       // Proposed metro: an elevated guideway with a coloured stripe, pillars and station platforms.
       const deck = ribbonGeometry(l.pts, 4.2, (p) => this.hp(p) + DECK, new THREE.Color(0xa3a8b0));
       const stripe = ribbonGeometry(l.pts, 1.2, (p) => this.hp(p) + DECK + 0.06, color);
@@ -909,10 +918,10 @@ export class Engine implements WorldRenderer {
     const s = new THREE.Vector3();
     let ti = 0;
     cars.forEach((c) => {
-      if (ti >= 200 || (c.underground && !this.layers.underground)) return;
+      if (ti >= 200 || (c.level === 'under' && !this.layers.underground)) return;
       const i = ti++;
       s.set(1, 1, c.carLen);
-      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.underground ? -UNDER + 0.2 : c.color !== undefined ? 8.15 : c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
+      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.level === 'under' ? -UNDER + 0.2 : c.level === 'deck' ? 8.15 : c.level === 'elevated' ? 7.2 : 0.15 + this.lift), -c.y);
       this.trainMesh.setMatrixAt(i, this.tmpM);
       this.trainMesh.setColorAt(i, this.tmpC.setHex(c.color ?? 0xc9ced6));
     });

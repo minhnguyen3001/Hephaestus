@@ -98,7 +98,7 @@ export class Plan2D implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
+    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
     if (!this.sim || sig !== this.roadSig || region !== this.region) this.startSim(world, region, 1);
     this.roadSig = sig;
     this.region = region;
@@ -537,8 +537,8 @@ export class Plan2D implements WorldRenderer {
     }
     ctx.fillStyle = '#c9ced6';
     for (const c of sim.trains) {
-      if (c.underground && !this.layers.underground) continue;
-      ctx.fillStyle = c.underground ? '#9b59b6' : '#c9ced6';
+      if (c.level === 'under' && !this.layers.underground) continue;
+      ctx.fillStyle = c.color !== undefined ? hex(c.color) : '#c9ced6';
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(Math.atan2(c.hy, c.hx) - Math.PI / 2);

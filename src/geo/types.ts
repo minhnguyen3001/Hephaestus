@@ -101,6 +101,7 @@ export interface WorldData {
   rails: Rail[];
   signalNodes: string[]; // OSM nodes tagged highway=traffic_signals
   trees?: Vec2[]; // OSM natural=tree nodes (mapped individual trees)
+  stations?: { p: Vec2; name?: string }[]; // OSM railway stations/halts (rail, subway, light rail)
   fetchedAt: string;
   source: string;
   terrain?: Terrain; // undefined = flat (no DEM or loading failed)

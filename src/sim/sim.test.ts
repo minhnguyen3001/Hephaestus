@@ -229,6 +229,20 @@ describe('simulation', () => {
     expect(sim.stats().transfers).toBeGreaterThan(0);
   });
 
+  it('turns mapped rail with stations into a working line', () => {
+    const w = gridFixture(300);
+    w.rails = [{ id: 'r1', nodes: ['a', 'b', 'c'], points: [[-700, -650], [0, -650], [700, -650]], kind: 'subway', elevated: false, tunnel: true }];
+    w.stations = [{ p: [-600, -640], name: 'West' }, { p: [0, -655], name: 'Central' }, { p: [600, -660], name: 'East' }];
+    const sim = new Simulation(w, profileFor('us'), 100, 3);
+    const line = sim.stats().lines.find((l) => l.id === 'osm-rail-0')!;
+    expect(line.name).toBe('Subway: West – East');
+    expect(line.vehicles).toBeGreaterThanOrEqual(2);
+    expect(sim.trainCars().some((c) => c.level === 'under')).toBe(true);
+    // without stations it stays a decorative shuttle
+    const plain = new Simulation({ ...w, stations: [] }, profileFor('us'), 100, 3);
+    expect(plain.stats().lines.some((l) => l.id === 'osm-rail-0')).toBe(false);
+  });
+
   it('dispatches emergency vehicles from hospitals and civic buildings', () => {
     const w = gridFixture();
     w.buildings[0] = { ...w.buildings[0], use: 'health', name: 'General Hospital' };

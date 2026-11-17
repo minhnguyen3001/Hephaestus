@@ -41,7 +41,8 @@ for (const place of FEATURED.filter((p) => !only || p.name === only)) {
   const t0 = Date.now();
   const core = await query(buildOverpassQuery(center, PACK_RADIUS, 'core'));
   const extras = await query(buildOverpassQuery(center, PACK_RADIUS, 'extras'));
-  const pack = { center, radius: PACK_RADIUS, builtAt: new Date().toISOString(), core: slimElements(core.elements), extras: slimElements(extras.elements) };
+  const stations = await query(buildOverpassQuery(center, PACK_RADIUS, 'stations'));
+  const pack = { center, radius: PACK_RADIUS, builtAt: new Date().toISOString(), core: slimElements(core.elements), extras: slimElements(extras.elements), stations: slimElements(stations.elements) };
   const json = JSON.stringify(pack);
   writeFileSync(`public/packs/${file}`, json);
   const i = index.findIndex((e) => e.file === file);

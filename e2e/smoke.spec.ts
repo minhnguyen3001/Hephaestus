@@ -260,3 +260,14 @@ test('advisor points at problems and flies there', async ({ page }) => {
   await page.waitForTimeout(1500);
   await page.screenshot({ path: 'test-results/19-challenge.png' });
 });
+
+test('real subway lines with stations carry riders', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
+  await expect(page.locator('.lines')).toContainText('Subway', { timeout: 90_000 });
+  await page.getByRole('button', { name: '60×' }).click();
+  await page.waitForTimeout(10000);
+  await page.locator('.lines').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'test-results/20-subway-lines.png' });
+});

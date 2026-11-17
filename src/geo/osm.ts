@@ -15,11 +15,19 @@ export const OVERPASS_MIRRORS = [
 ];
 
 /** 'core' = what the city needs to be playable; 'extras' = water/parks/coastline, loaded afterwards. */
-export type QueryPart = 'core' | 'extras';
+export type QueryPart = 'core' | 'extras' | 'stations';
 
 export function buildOverpassQuery(c: LatLon, radius: number, part: QueryPart = 'core'): string {
   const ll = `${c.lat.toFixed(6)},${c.lon.toFixed(6)}`;
   const a = `(around:${Math.round(radius)},${ll})`;
+  if (part === 'stations') {
+    return `[out:json][timeout:25];
+(
+  node["railway"~"^(station|halt)$"]${a};
+  node["public_transport"="station"]["station"]${a};
+);
+out;`;
+  }
   if (part === 'core') {
     return `[out:json][timeout:30];
 (
@@ -157,6 +165,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   const rails: Rail[] = [];
   const signalNodes: string[] = [];
   const trees: Vec2[] = [];
+  const stations: { p: Vec2; name?: string }[] = [];
   const coast: Vec2[][] = [];
   const E = radius * 1.3; // everything area-like is clipped to this square (matches the terrain extent)
 
@@ -177,6 +186,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
     if (el.type === 'node') {
       if (tags.highway === 'traffic_signals') signalNodes.push(`n${el.id}`);
       else if (tags.natural === 'tree' && el.lat !== undefined && el.lon !== undefined) trees.push(proj.toLocal(el.lat, el.lon));
+      else if ((tags.railway === 'station' || tags.railway === 'halt' || tags.public_transport === 'station') && el.lat !== undefined && el.lon !== undefined && tags.station !== 'bus') stations.push({ p: proj.toLocal(el.lat, el.lon), name: tags.name });
       continue;
     }
     if (el.type === 'relation') {
@@ -270,7 +280,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
   }
 
   return {
-    center, radius, buildings, roads, areas, rails, signalNodes, trees,
+    center, radius, buildings, roads, areas, rails, signalNodes, trees, stations,
     fetchedAt: new Date().toISOString(),
     source: 'OpenStreetMap (Overpass API)',
   };
@@ -294,6 +304,7 @@ interface Pack {
   radius: number;
   core: OsmElement[];
   extras: OsmElement[];
+  stations?: OsmElement[];
 }
 
 export const packFile = (c: LatLon) => `${c.lat.toFixed(4)}_${c.lon.toFixed(4)}.json`;
@@ -301,6 +312,7 @@ export const packFile = (c: LatLon) => `${c.lat.toFixed(4)}_${c.lon.toFixed(4)}.
 const KEEP_TAGS = new Set([
   'building', 'building:levels', 'height', 'amenity', 'shop', 'office', 'name', 'highway', 'oneway', 'junction', 'lanes',
   'maxspeed', 'bridge', 'tunnel', 'layer', 'area', 'railway', 'natural', 'waterway', 'landuse', 'leisure', 'type',
+  'public_transport', 'station',
 ]);
 const r6 = (g: { lat: number; lon: number }) => ({ lat: Math.round(g.lat * 1e6) / 1e6, lon: Math.round(g.lon * 1e6) / 1e6 });
 
@@ -381,4 +393,11 @@ export async function fetchAreas(center: LatLon, radius: number, signal?: AbortS
   }
   const w = parseOverpass(await overpass(buildOverpassQuery(center, radius, 'extras'), signal), center, radius);
   return { areas: w.areas, trees: w.trees };
+}
+
+/** Rail/subway stations (small, fast query). Packs built after stations support carry them too. */
+export async function fetchStations(center: LatLon, radius: number, signal?: AbortSignal): Promise<WorldData['stations']> {
+  const pack = await loadPack(center, radius);
+  if (pack?.stations) return parseOverpass({ elements: pack.stations }, center, radius).stations;
+  return parseOverpass(await overpass(buildOverpassQuery(center, radius, 'stations'), signal), center, radius).stations;
 }

@@ -84,10 +84,16 @@ interface Line {
   stopSeq: [number[], number[]]; // stop ids in travel order per direction
   paths?: [number[], number[]]; // bus: edge paths per direction
   stopAtPath?: [Map<number, number>, Map<number, number>]; // bus: path index (stop at edge end; -1 = start) → stop id
-  poly?: Poly; // metro guideway
+  poly?: Poly; // metro guideway (user) or mapped rail line (real)
   stationS?: number[]; // metro: distance along poly of each stop in stopSeq[0]
   boardings: number;
+  level: TrainLevel;
+  real?: boolean; // runs on mapped OSM rail with mapped stations
+  cars: number;
+  carLen: number;
 }
+
+export type TrainLevel = 'ground' | 'elevated' | 'deck' | 'under';
 
 interface MetroTrain {
   line: number;
@@ -105,6 +111,8 @@ export interface TransitLineView {
   mode: 'bus' | 'metro';
   color: number;
   generated: boolean;
+  real?: boolean;
+  level?: TrainLevel;
   pts: Vec2[];
   stops: Vec2[];
 }
@@ -149,6 +157,7 @@ export interface TrainCar {
   carLen: number;
   color?: number;
   underground?: boolean;
+  level: TrainLevel;
 }
 
 export interface SimStats {
@@ -392,7 +401,7 @@ export class Simulation {
     const g = this.graph;
     const order = (dir: 0 | 1) => [...stopAtPath[dir].entries()].sort((a, b) => a[0] - b[0]).map(([, id]) => id);
     const li = this.transit.length;
-    this.transit.push({ ...meta, mode: 'bus', paths, stopAtPath, stopSeq: [order(0), order(1)], boardings: 0 });
+    this.transit.push({ ...meta, mode: 'bus', paths, stopAtPath, stopSeq: [order(0), order(1)], boardings: 0, level: 'ground', cars: 1, carLen: 12 });
     for (const dir of [0, 1] as const) for (const id of stopAtPath[dir].values()) this.stops[id].lines.add(li);
     for (const dir of [0, 1] as const) {
       for (let k = 0; k < perDir; k++) {
@@ -479,7 +488,7 @@ export class Simulation {
         const poly = { pts, cum, len: cum[cum.length - 1] };
         this.transit.push({
           id: spec.id, name: spec.name, mode: 'metro', color: spec.color, generated: false,
-          stopSeq: [ids, [...ids].reverse()], poly, stationS: cum, boardings: 0,
+          stopSeq: [ids, [...ids].reverse()], poly, stationS: cum, boardings: 0, level: 'deck', cars: 3, carLen: 16,
         });
         const n = Math.max(2, Math.ceil(poly.len / 900));
         for (let k = 0; k < n; k++) {
@@ -538,9 +547,15 @@ export class Simulation {
         .sort((a, b) => b.len - a.len)
         .slice(0, 8);
     const lines = [...longest(false), ...longest(true)];
+    let realN = 0;
     for (const l of lines) {
       const cum = [0];
       for (let i = 1; i < l.pts.length; i++) cum.push(cum[i - 1] + dist(l.pts[i - 1], l.pts[i]));
+      // Mapped stations along this line turn it into a working transit line riders can use.
+      if (this.addRealLine({ pts: l.pts, cum, len: l.len }, l, world.stations ?? [], realN)) {
+        realN++;
+        continue;
+      }
       this.lines.push({ pts: l.pts, cum, len: l.len, elevated: l.elevated, underground: l.underground, kind: l.kind });
       const tram = l.kind === 'tram';
       this.trains.push({
@@ -548,6 +563,50 @@ export class Simulation {
         cars: tram ? 2 : 4, carLen: tram ? 14 : 18,
       });
     }
+  }
+
+  private addRealLine(poly: Poly, l: { kind: string; elevated: boolean; underground: boolean }, stations: { p: Vec2; name?: string }[], n: number): boolean {
+    const onLine: { s: number; p: Vec2; name?: string }[] = [];
+    for (const st of stations) {
+      let best = { s: 0, d: Infinity, p: st.p as Vec2 };
+      for (let i = 1; i < poly.pts.length; i++) {
+        const a = poly.pts[i - 1];
+        const b = poly.pts[i];
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const t = Math.max(0, Math.min(1, ((st.p[0] - a[0]) * dx + (st.p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+        const q: Vec2 = [a[0] + dx * t, a[1] + dy * t];
+        const d = dist(q, st.p);
+        if (d < best.d) best = { s: poly.cum[i - 1] + t * (poly.cum[i] - poly.cum[i - 1]), d, p: q };
+      }
+      if (best.d < 90) onLine.push({ s: best.s, p: best.p, name: st.name });
+    }
+    onLine.sort((a, b) => a.s - b.s);
+    const kept = onLine.filter((x, i) => i === 0 || x.s - onLine[i - 1].s > 150);
+    if (kept.length < 2) return false;
+    const li = this.transit.length;
+    const ids = kept.map((k) => {
+      const id = this.stops.length;
+      this.stops.push({ id, p: k.p, walkNode: this.graph.nearestNode(k.p, 'walk'), waiting: [], lines: new Set([li]) });
+      return id;
+    });
+    const tram = l.kind === 'tram';
+    const label = l.kind === 'subway' ? 'Subway' : tram ? 'Tram' : l.kind === 'light_rail' ? 'Light rail' : 'Rail';
+    const ends = [kept[0].name, kept[kept.length - 1].name];
+    this.transit.push({
+      id: `osm-rail-${n}`, name: ends[0] && ends[1] ? `${label}: ${ends[0]} – ${ends[1]}` : `${label} line ${n + 1}`,
+      mode: 'metro', color: l.kind === 'subway' ? 0x9b59b6 : tram ? 0x16a085 : 0x7f8c8d, generated: true, real: true,
+      stopSeq: [ids, [...ids].reverse()], poly: { ...poly, len: poly.len }, stationS: kept.map((k) => k.s), boardings: 0,
+      level: l.underground ? 'under' : l.elevated ? 'elevated' : 'ground', cars: tram ? 2 : 4, carLen: tram ? 14 : 18,
+    });
+    const span = kept[kept.length - 1].s - kept[0].s;
+    const trains = Math.max(2, Math.ceil(span / 1200));
+    for (let k = 0; k < trains; k++) {
+      const dir: 1 | -1 = k % 2 ? -1 : 1;
+      const idx = Math.min(kept.length - 1, Math.floor((k / trains) * kept.length));
+      this.metros.push({ line: li, s: kept[idx].s, dir, next: Math.max(0, Math.min(kept.length - 1, idx + dir)), v: 0, dwell: 5 + k * 7, riders: [] });
+    }
+    return true;
   }
 
   // ---------- trips ----------
@@ -1022,9 +1081,9 @@ export class Simulation {
     for (const t of this.metros) {
       const line = this.transit[t.line];
       const poly = line.poly!;
-      for (let i = 0; i < 3; i++) {
-        const s = Math.min(poly.len, Math.max(0, t.s - t.dir * (i * 17 + 8)));
-        out.push({ ...this.along(poly, s, t.dir), elevated: true, carLen: 16, color: line.color });
+      for (let i = 0; i < line.cars; i++) {
+        const s = Math.min(poly.len, Math.max(0, t.s - t.dir * (i * (line.carLen + 1) + line.carLen / 2)));
+        out.push({ ...this.along(poly, s, t.dir), elevated: line.level !== 'ground', carLen: line.carLen, color: line.color, level: line.level, underground: line.level === 'under' || undefined });
       }
     }
     for (const t of this.trains) {
@@ -1045,6 +1104,7 @@ export class Simulation {
           elevated: line.elevated,
           carLen: t.carLen,
           underground: line.underground || undefined,
+          level: line.underground ? 'under' : line.elevated ? 'elevated' : 'ground',
         });
       }
     }
@@ -1118,7 +1178,7 @@ export class Simulation {
   transitLines(): TransitLineView[] {
     const g = this.graph;
     return this.transit.map((l) => ({
-      id: l.id, name: l.name, mode: l.mode, color: l.color, generated: l.generated,
+      id: l.id, name: l.name, mode: l.mode, color: l.color, generated: l.generated, real: l.real, level: l.level,
       pts: l.poly ? l.poly.pts : [g.nodes[g.edges[l.paths![0][0]].from].p, ...l.paths![0].map((e) => g.nodes[g.edges[e].to].p)],
       stops: l.stopSeq[0].map((id) => this.stops[id].p),
     }));

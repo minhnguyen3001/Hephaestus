@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchAreas, fetchWorld } from '../geo/osm';
+import { fetchAreas, fetchStations, fetchWorld } from '../geo/osm';
 import { fetchTerrain } from '../geo/terrain';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
@@ -210,6 +210,9 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         fetchAreas(center, project.radius, ctrl.signal)
           .then((extra) => setBase((b) => (b ? { ...b, ...extra } : b)))
           .catch(() => setHint('Water and parks could not be loaded right now (map servers busy).'));
+        fetchStations(center, project.radius, ctrl.signal)
+          .then((stations) => stations?.length && setBase((b) => (b ? { ...b, stations } : b)))
+          .catch(() => undefined); // trains still run end-to-end without station data
       })
       .catch((e: Error) => {
         if (e.name !== 'AbortError') setError(e.message || 'Could not load map data.');
