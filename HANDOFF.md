@@ -17,7 +17,17 @@ Phase 1 is done, and much of Phases 2–3 too. A user can:
 - Compare the original and proposed city in the dashboard, with a traffic flow layer.
 - Rely on autosave, which keeps projects locally.
 
-Not built yet: multiple scenarios per project, share links, accounts, collaboration, underground metro, trees, zoning brush, and any backend (deferred: zero cost).
+Since then, a user can also:
+- Keep several named scenarios per project and compare them side by side.
+- Share a plan as a link (`#plan=…`). No server is involved.
+- Zone areas, which fill with buildings automatically.
+- Edit road properties.
+- Toggle weekday and weekend demand, and project +5, +10 and +20 years.
+- Use the underground x-ray view.
+- See trees, pitched roofs and bridge decks.
+- Follow an interactive tour.
+
+Not built yet: accounts, collaboration, and any backend (deferred: zero cost); transit transfers; emergency vehicles; subway stations.
 
 ## Technical map
 | Area | Files |
@@ -29,7 +39,8 @@ Not built yet: multiple scenarios per project, share links, accounts, collaborat
 | Worker | `src/sim/worker.ts`, `src/sim/protocol.ts` (frames), `src/sim/client.ts` (SimClient: worker or inline) |
 | Scenario | `src/project/edits.ts` (Edit union incl. addLine/removeLine, applyEdits, connectRoad), `src/project/store.ts` |
 | Rendering | `src/render/engine.ts` (3D Engine implements WorldRenderer), `src/render/plan2d.ts` (2D), `src/render/tools.ts` (shared ToolController), `src/render/geometry.ts`, `src/render/palette.ts`, `src/render/quality.ts` |
-| UI | `src/ui/WorldView.tsx` (state owner), `src/ui/Panels.tsx`, `src/ui/Landing.tsx`, `src/ui/SearchBox.tsx`, `src/ui/metrics.ts` |
+| UI | `src/ui/WorldView.tsx` (state owner), `src/ui/Panels.tsx`, `src/ui/Tour.tsx`, `src/ui/Landing.tsx`, `src/ui/SearchBox.tsx`, `src/ui/metrics.ts` |
+| Planning | `src/project/zoning.ts` (zone → buildings/park), `src/project/share.ts` (URL codec), `src/geo/trees.ts` |
 | Tests | `src/sim/sim.test.ts`, `src/geo/polygons.test.ts`, `e2e/smoke.spec.ts` |
 
 Contract: React owns project, history and view state. It calls `renderer.setWorld(world, region)`, and renderers report through `EngineCallbacks`. Renderers rebuild the simulation only when roads, region or transit lines change.
@@ -39,19 +50,18 @@ Contract: React owns project, history and view state. It calls `renderer.setWorl
 - Workflow: commit on `main` (or a short-lived branch, fast-forwarded), push immediately.
 
 ## Testing state
-- `npm test`: 21/21 passing.
-- `npx playwright test`: 6 scenarios. 2D plan, traffic, metro and terrain pass. The Chicago and Hong Kong scenarios need live Overpass until their packs are built, and fail when public servers are busy.
+- `npm test`: 29/29 passing.
+- `npx playwright test`: 12 scenarios in `e2e/smoke.spec.ts` plus `e2e/mobile.spec.ts`; all pass. The Chicago scenario uses live Overpass until its pack exists, so it can time out when public servers are busy.
+- `npx playwright test e2e/perf.spec.ts`: throttled benchmark → `test-results/perf.json` (see docs/PERFORMANCE.md).
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader runs at about 1–15 fps, which says nothing about real GPU performance.
 
 ## Next actions
-1. Rebuild the failed packs (Chicago Loop, District 1 Saigon, plus any others missing from `public/packs/index.json`).
-2. Scenarios: multiple named proposals per project, with comparison.
-3. Share links: encode place and edits in the URL (compressed).
-4. Persist camera per project.
-5. Trees and street furniture (instanced) for visual polish.
-6. Zoning brush and polygon building/park tools.
-7. Underground metro view and OSM subway stations.
-8. Write the performance doc after throttled measurements.
+1. Finish the missing packs (Chicago, Saigon, Amsterdam): `npx tsx scripts/build-city-packs.ts "<name>"`.
+2. Emergency vehicles with priority (P1).
+3. Transit transfers; subway stations from OSM.
+4. Planning challenges (goal-based scenarios).
+5. Geometry build in a worker (faster ready time).
+6. Real-device QA notes.
 
 ## Owner decisions
 - Approved: the master brief; **zero cost**; **automatic GitHub operations**; continuous autonomous work.
