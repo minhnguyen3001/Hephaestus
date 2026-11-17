@@ -212,3 +212,24 @@ test('zone an area and see buildings and capacity appear', async ({ page }) => {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'test-results/16-zone-3d.png' });
 });
+
+test('interactive tour advances on real actions', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.view', '2d'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await page.getByRole('button', { name: 'Take the 1-minute tour' }).click({ timeout: 30_000 });
+  await expect(page.locator('.tour')).toContainText('Step 1 of 6');
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  await page.mouse.move(box.x + 700, box.y + 450);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 600, box.y + 380, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator('.tour')).toContainText('Step 2 of 6', { timeout: 5000 });
+  for (const [fx, fy] of [[0.5, 0.5], [0.45, 0.55], [0.55, 0.45], [0.6, 0.6]]) {
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    if (await page.locator('.inspector').isVisible()) break;
+  }
+  await expect(page.locator('.tour')).toContainText('Step 3 of 6');
+  await page.getByRole('button', { name: 'Skip tour' }).click();
+  await expect(page.locator('.tour')).toHaveCount(0);
+});

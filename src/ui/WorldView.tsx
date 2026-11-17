@@ -14,6 +14,7 @@ import type { DayType, SimStats } from '../sim/simulation';
 import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
+import { Tour, type TourSignals } from './Tour';
 
 const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select & inspect', key: '1', icon: '➚' },
@@ -79,6 +80,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     }
   });
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
+  const [tour, setTour] = useState<TourSignals>({ cameraMoved: false, inspected: false, orbited: false, edited: false, compared: false, fast: false });
+  const mark = useCallback((k: keyof TourSignals) => setTour((t) => (t[k] ? t : { ...t, [k]: true })), []);
 
   const host = useRef<HTMLDivElement>(null);
   const pendingView = useRef(true);
@@ -253,6 +256,28 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
 
   const setCam = (m: CameraMode) => engine.current?.setCameraMode(m);
 
+  // Tour progress comes from what the user actually does.
+  useEffect(() => {
+    if (!onboard || !base) return;
+    const start = JSON.stringify(engine.current?.getView());
+    const t = setInterval(() => {
+      if (JSON.stringify(engine.current?.getView()) !== start) mark('cameraMoved');
+    }, 600);
+    return () => clearInterval(t);
+  }, [onboard, base, mark]);
+  useEffect(() => {
+    if (selection) mark('inspected');
+  }, [selection, mark]);
+  useEffect(() => {
+    if (history.edits.length) mark('edited');
+  }, [history.edits.length, mark]);
+  useEffect(() => {
+    if (view === 'original') mark('compared');
+  }, [view, mark]);
+  useEffect(() => {
+    if (speed >= 20) mark('fast');
+  }, [speed, mark]);
+
   const commit = (next: typeof project) => {
     projectRef.current = next;
     setProject(next);
@@ -301,14 +326,14 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       window.prompt('Copy this link to share your plan:', url);
     }
   };
-  const dismissOnboard = () => {
+  const dismissOnboard = useCallback(() => {
     setOnboard(false);
     try {
       localStorage.setItem(ONBOARD_KEY, '1');
     } catch {
       /* ignore */
     }
-  };
+  }, []);
   const editable = view === 'proposed';
   const loading = !base && !error;
 
@@ -400,7 +425,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           sel={selection}
           editable={editable}
           onEdit={edit}
-          onFocus={() => engine.current?.focusSelected()}
+          onFocus={() => {
+            mark('orbited');
+            engine.current?.focusSelected();
+          }}
           following={selection.type === 'agent' && following === selection.agent.id}
           onFollow={(id) => {
             setFollowing(id);
@@ -485,19 +513,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         </div>
       )}
 
-      {onboard && base && (
-        <div className="panel coach" role="dialog" aria-label="Quick tour">
-          <h3>Welcome to {project.place.name}</h3>
-          <ol>
-            <li><b>Drag</b> to orbit 360°, <b>right-drag</b> or WASD to pan, <b>scroll</b> or pinch to zoom.</li>
-            <li><b>Click</b> a building, road, person or vehicle to inspect it. <b>Double-click</b> to orbit around it.</li>
-            <li>Use the tools on the left to build, draw roads or bulldoze. Undo anytime.</li>
-            <li>Watch the dashboard: housing, jobs and live traffic update with your plan.</li>
-            <li>Toggle <b>Original / Proposed</b> to compare. Everything autosaves.</li>
-          </ol>
-          <button onClick={dismissOnboard}>Start exploring</button>
-        </div>
-      )}
+      {onboard && base && <Tour place={project.place.name} signals={tour} onClose={dismissOnboard} />}
     </div>
   );
 }

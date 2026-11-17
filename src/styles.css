@@ -236,3 +236,15 @@ select.scenario { max-width: 150px; }
 .field.row-check { flex-direction: row; align-items: center; gap: 8px; }
 .field.row-check input { accent-color: var(--accent); }
 .note.projection { color: #ffd59a; }
+
+.coach .primary, .tour .primary { background: var(--accent); color: var(--accent-ink); border: none; font-weight: 600; }
+.coach .row button { flex: 1; }
+.tour { left: 92px; top: 72px; width: 290px; padding: 14px 16px; z-index: 9; }
+.tour h3 { margin: 4px 0 4px; font: 600 16px var(--display); }
+.tour p { margin: 0 0 10px; color: #c8d2dc; font-size: 13px; }
+.tour-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.dots { display: flex; gap: 5px; }
+.dots i { width: 18px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.15); }
+.dots i.done { background: var(--accent); }
+.dots i.now { background: rgba(63,211,195,0.5); }
+@media (max-width: 600px) { .tour { left: 8px; right: 8px; width: auto; top: 64px; } }
