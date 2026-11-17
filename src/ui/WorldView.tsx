@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchWorld } from '../geo/osm';
+import { fetchTerrain } from '../geo/terrain';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
 import { saveProject, type Project } from '../project/store';
@@ -123,8 +124,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   useEffect(() => {
     const ctrl = new AbortController();
     setError(null);
-    fetchWorld({ lat: project.place.lat, lon: project.place.lon }, project.radius, ctrl.signal)
-      .then((w) => {
+    const center = { lat: project.place.lat, lon: project.place.lon };
+    Promise.all([fetchWorld(center, project.radius, ctrl.signal), fetchTerrain(center, project.radius, ctrl.signal)])
+      .then(([w, terrain]) => {
+        w.terrain = terrain;
         if (!w.buildings.length && !w.roads.length) setError('No mapped streets or buildings were found here. Try a more central location.');
         setBase(w);
       })
@@ -285,6 +288,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {base && <span>{fmt(base.buildings.length)} buildings · {originalMetrics ? Math.round(originalMetrics.estimatedHeights * 100) : 0}% heights estimated · </span>}
         {perf && <span className="hide-sm">{Math.round(perf.fps)} fps · {perf.quality} · </span>}
         Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
+        {base?.terrain && <> · Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">AWS Terrain Tiles</a></>}
       </footer>
 
       {(loading || error || webglError) && (

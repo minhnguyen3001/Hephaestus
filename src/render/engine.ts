@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Building, Road, Vec2, WorldData } from '../geo/types';
+import { sampleTerrain } from '../geo/terrain';
 import { centroid, dist } from '../geo/util';
 import type { Edit } from '../project/edits';
 import { roadWidth } from '../sim/graph';
@@ -89,7 +90,7 @@ export class Engine {
   private roadPreview?: THREE.Line;
   private night = { value: 0 };
   private buildingMat: THREE.MeshStandardMaterial;
-  private flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide });
+  private flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   private world?: WorldData;
   private region?: RegionProfile;
   sim?: Simulation;
@@ -118,6 +119,13 @@ export class Engine {
   private disposed = false;
   private tmpM = new THREE.Matrix4();
   private tmpC = new THREE.Color();
+  /** Ground height (m) at local x, y. */
+  private h = (x: number, y: number) => sampleTerrain(this.world?.terrain, x, y);
+  private hp = (p: Vec2) => this.h(p[0], p[1]);
+  /** Extra clearance for draped layers when the ground is not flat (terrain mesh is coarser than the sampler). */
+  private get lift() {
+    return this.world?.terrain ? 0.3 : 0;
+  }
 
   constructor(private container: HTMLElement, private cb: EngineCallbacks, private qualitySetting: QualitySetting = 'auto') {
     this.quality = resolveQuality(qualitySetting);
@@ -126,6 +134,7 @@ export class Engine {
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, preset.pixelRatio);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.85;
     this.renderer.shadowMap.enabled = preset.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const canvas = this.renderer.domElement;
@@ -198,7 +207,7 @@ export class Engine {
     this.region = region;
     this.buildStatic();
     this.buildTransit();
-    if (first) this.flyTo(new THREE.Vector3(0, 0, 0), world.radius * 1.15, 0.9, true);
+    if (first) this.flyTo(new THREE.Vector3(0, this.h(0, 0), 0), world.radius * 1.15, 0.9, true);
     this.refreshSelection();
   }
 
@@ -244,16 +253,17 @@ export class Engine {
     this.followId = agentId;
     if (agentId !== null) {
       const a = this.sim?.agents.find((x) => x.id === agentId);
-      if (a) this.flyTo(v3([a.x, a.y], 1), 45, 1.05);
+      if (a) this.flyTo(v3([a.x, a.y], this.h(a.x, a.y) + 1), 45, 1.05);
     }
   }
 
   setCameraMode(mode: CameraMode, instant = false) {
     const t = this.controls.target.clone();
     const r = this.world?.radius ?? 600;
-    if (mode === 'aerial') this.flyTo(new THREE.Vector3(0, 0, 0), r * 2.1, 0.55, instant);
-    else if (mode === 'neighborhood') this.flyTo(new THREE.Vector3(t.x, 0, t.z), Math.min(420, r), 0.95, instant);
-    else if (mode === 'street') this.flyTo(new THREE.Vector3(t.x, 1.7, t.z), 14, 1.48, instant);
+    const g = this.h(t.x, -t.z);
+    if (mode === 'aerial') this.flyTo(new THREE.Vector3(0, this.h(0, 0), 0), r * 2.1, 0.55, instant);
+    else if (mode === 'neighborhood') this.flyTo(new THREE.Vector3(t.x, g, t.z), Math.min(420, r), 0.95, instant);
+    else if (mode === 'street') this.flyTo(new THREE.Vector3(t.x, g + 1.7, t.z), 14, 1.48, instant);
     else this.focusSelected();
   }
 
@@ -265,10 +275,13 @@ export class Engine {
       const b = this.world.buildings.find((x) => x.id === s.id);
       if (!b) return;
       const size = Math.max(...b.footprint.map((p) => dist(p, centroid(b.footprint))));
-      this.flyTo(v3(centroid(b.footprint), b.height * 0.45), Math.max(40, size * 2.6, b.height * 1.8), 1.15);
+      this.flyTo(v3(centroid(b.footprint), this.base(b) + b.height * 0.45), Math.max(40, size * 2.6, b.height * 1.8), 1.15);
     } else if (s.type === 'road') {
       const r = this.world.roads.find((x) => x.id === s.id);
-      if (r) this.flyTo(v3(r.points[Math.floor(r.points.length / 2)], 0), 90, 1.0);
+      if (r) {
+        const mid = r.points[Math.floor(r.points.length / 2)];
+        this.flyTo(v3(mid, this.hp(mid)), 90, 1.0);
+      }
     } else this.follow(s.id as number);
   }
 
@@ -344,17 +357,40 @@ export class Engine {
     const shadows = PRESETS[this.quality].shadows;
     const r = w.radius;
 
-    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcdc6b6, roughness: 1 }));
-    this.ground.receiveShadow = shadows;
+    const t = w.terrain;
+    const lift = this.lift;
+    if (t) {
+      // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
+      const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, t.n - 1, t.n - 1).rotateX(-Math.PI / 2);
+      const pos = g.attributes.position;
+      const cols: number[] = [];
+      const inner = new THREE.Color(0xe6e0d3);
+      const outer = new THREE.Color(0xc9c2b1);
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = -pos.getZ(i);
+        pos.setY(i, this.h(x, y));
+        const c = outer.clone().lerp(inner, THREE.MathUtils.smoothstep(r + 20 - Math.hypot(x, y), 0, 30));
+        cols.push(c.r, c.g, c.b);
+      }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+      g.computeVertexNormals();
+      this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+      this.ground.receiveShadow = shadows;
+      const skirt = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2).translate(0, t.min - 2, 0), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
+      this.worldGroup.add(this.ground, skirt);
+    } else {
+      this.ground = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcdc6b6, roughness: 1 }));
+      this.ground.receiveShadow = shadows;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 96).rotateX(-Math.PI / 2).translate(0, 0.02, 0), new THREE.MeshStandardMaterial({ color: 0xe6e0d3, roughness: 1 }));
+      disc.receiveShadow = shadows;
+      const ring = new THREE.Mesh(new THREE.RingGeometry(r - 2, r, 128).rotateX(-Math.PI / 2).translate(0, 0.05, 0), new THREE.MeshBasicMaterial({ color: 0x3a7bd5, transparent: true, opacity: 0.35 }));
+      this.worldGroup.add(this.ground, disc, ring);
+    }
     this.ground.userData.ground = true;
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 96).rotateX(-Math.PI / 2).translate(0, 0.02, 0), new THREE.MeshStandardMaterial({ color: 0xe6e0d3, roughness: 1 }));
-    disc.receiveShadow = shadows;
-    disc.userData.ground = true;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(r - 2, r, 128).rotateX(-Math.PI / 2).translate(0, 0.05, 0), new THREE.MeshBasicMaterial({ color: 0x3a7bd5, transparent: true, opacity: 0.35 }));
-    this.worldGroup.add(this.ground, disc, ring);
 
     const areaGeoms = w.areas
-      .map((a) => polygonGeometry(a.polygon, a.kind === 'water' ? 0.04 : 0.05, new THREE.Color(a.kind === 'water' ? 0x77abd3 : 0xa6c98c)))
+      .map((a) => polygonGeometry(a.polygon, (p) => this.hp(p) + lift + (a.kind === 'water' ? 0.04 : 0.05), new THREE.Color(a.kind === 'water' ? 0x77abd3 : 0xa6c98c)))
       .filter((g): g is THREE.BufferGeometry => !!g);
     if (areaGeoms.length) {
       const m = new THREE.Mesh(mergeGeometries(areaGeoms)!, this.flatMat);
@@ -369,10 +405,10 @@ export class Engine {
       if (road.tunnel) continue;
       const color = new THREE.Color(ROAD_COLORS[road.kind]);
       if (road.origin === 'proposed') color.lerp(new THREE.Color(0x3fd3c3), 0.45);
-      const g = ribbonGeometry(road.points, roadWidth(road), ROAD_Y[road.kind], color);
+      const g = ribbonGeometry(road.points, roadWidth(road), (p) => this.hp(p) + lift + ROAD_Y[road.kind], color);
       if (g) roadItems.push({ id: road.id, geom: g });
       if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
-        const c = ribbonGeometry(road.points, 0.18, ROAD_Y[road.kind] + 0.01, mark);
+        const c = ribbonGeometry(road.points, 0.18, (p) => this.hp(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
         if (c) roadItems.push({ id: road.id, geom: c });
       }
     }
@@ -385,7 +421,7 @@ export class Engine {
     const pillars: THREE.Vector3[] = [];
     for (const rail of w.rails) {
       if (rail.tunnel) continue;
-      const y = rail.elevated ? 7 : 0.15;
+      const y = (p: Vec2) => this.hp(p) + (rail.elevated ? 7 : 0.15 + lift);
       const g = ribbonGeometry(rail.points, rail.kind === 'tram' ? 1.8 : 2.8, y, new THREE.Color(rail.elevated ? 0x5b5450 : 0x6f625a));
       if (g) railGeoms.push(g);
       if (rail.elevated) {
@@ -404,14 +440,14 @@ export class Engine {
     }
     if (pillars.length) {
       const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x8b857d }), pillars.length);
-      pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p)));
+      pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p.setY(this.h(p.x, -p.z)))));
       pm.castShadow = shadows;
       this.worldGroup.add(pm);
     }
 
     const style: BuildingStyle = { highlightEstimated: this.layers.estimated };
     this.buildings = new PickMesh(
-      w.buildings.map((b) => ({ id: b.id, geom: buildingGeometry(b, buildingColor(b, style)) })),
+      w.buildings.map((b) => ({ id: b.id, geom: buildingGeometry(b, buildingColor(b, style), this.base(b)) })),
       this.buildingMat,
     );
     this.buildings.mesh.castShadow = shadows;
@@ -436,18 +472,26 @@ export class Engine {
     this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
   }
 
+  /** Buildings sit on the lowest ground under their footprint so no wall floats. */
+  private base(b: Building) {
+    if (!this.world?.terrain) return 0;
+    let m = Infinity;
+    for (const p of b.footprint) m = Math.min(m, this.hp(p));
+    return m;
+  }
+
   private buildTransit() {
     this.clearGroup(this.transitGroup);
     if (!this.sim || !this.region) return;
     const color = new THREE.Color(this.region.busColor);
-    const geoms = this.sim.busRouteLines().map((l) => ribbonGeometry(l, 1.1, 0.16, color)).filter((g): g is THREE.BufferGeometry => !!g);
+    const geoms = this.sim.busRouteLines().map((l) => ribbonGeometry(l, 1.1, (p) => this.hp(p) + this.lift + 0.16, color)).filter((g): g is THREE.BufferGeometry => !!g);
     if (geoms.length) {
       this.transitGroup.add(new THREE.Mesh(mergeGeometries(geoms)!, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false })));
     }
     const stops = this.sim.stopPositions();
     if (stops.length) {
       const m = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.6, 3.2, 8).translate(0, 1.6, 0), new THREE.MeshStandardMaterial({ color: this.region.busColor, emissive: this.region.busColor, emissiveIntensity: 0.25 }), stops.length);
-      stops.forEach((p, i) => m.setMatrixAt(i, this.tmpM.makeTranslation(p[0] + 3, 0, -p[1] - 3)));
+      stops.forEach((p, i) => m.setMatrixAt(i, this.tmpM.makeTranslation(p[0] + 3, this.h(p[0] + 3, p[1] + 3), -p[1] - 3)));
       this.transitGroup.add(m);
     }
   }
@@ -464,7 +508,7 @@ export class Engine {
     if (s.type === 'building') {
       const b = w.buildings.find((x) => x.id === s.id);
       if (!b) return this.select(null);
-      const g = buildingGeometry({ ...b, height: b.height + 0.05 }, new THREE.Color());
+      const g = buildingGeometry({ ...b, height: b.height + 0.05 }, new THREE.Color(), this.base(b));
       this.highlight = new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), new THREE.LineBasicMaterial({ color: 0x00e5ff, depthTest: false, transparent: true }));
       g.dispose();
       this.highlight.renderOrder = 10;
@@ -473,7 +517,7 @@ export class Engine {
     } else if (s.type === 'road') {
       const r = w.roads.find((x) => x.id === s.id);
       if (!r) return this.select(null);
-      const g = ribbonGeometry(r.points, roadWidth(r) + 1.5, 0.2, new THREE.Color(0x00e5ff));
+      const g = ribbonGeometry(r.points, roadWidth(r) + 1.5, (p) => this.hp(p) + this.lift + 0.2, new THREE.Color(0x00e5ff));
       if (g) {
         this.highlight = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.45, depthWrite: false }));
         this.scene.add(this.highlight);
@@ -508,7 +552,8 @@ export class Engine {
     this.updateAgents();
     this.updateCamera(dt);
     this.controls.update();
-    if (this.camera.position.y < 1.5) this.camera.position.y = 1.5;
+    const floor = this.h(this.camera.position.x, -this.camera.position.z) + 1.5;
+    if (this.camera.position.y < floor) this.camera.position.y = floor;
     this.updateSky();
     this.renderer.render(this.scene, this.camera);
     this.trackPerf(dt);
@@ -526,13 +571,14 @@ export class Engine {
       const slots = this.agentSlots[a.kind];
       if (slots.length < MAX_INSTANCES) slots.push(a);
     }
+    const lift = this.lift + 0.12;
     for (const k of AGENT_KINDS) {
       const mesh = this.agentMeshes[k];
       const slots = this.agentSlots[k];
       const palette = k === 'taxi' ? [this.region!.taxiColor] : k === 'bus' ? [this.region!.busColor] : PALETTES[k];
       for (let i = 0; i < slots.length; i++) {
         const a = slots[i];
-        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, 0.12, -a.y);
+        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, this.h(a.x, a.y) + lift, -a.y);
         mesh.setMatrixAt(i, this.tmpM);
         mesh.setColorAt(i, this.tmpC.setHex(a.id === this.followId ? 0x00e5ff : palette[a.id % palette.length]));
       }
@@ -545,7 +591,7 @@ export class Engine {
     cars.forEach((c, i) => {
       if (i >= 200) return;
       s.set(1, 1, c.carLen);
-      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, c.elevated ? 7.2 : 0.15, -c.y);
+      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
       this.trainMesh.setMatrixAt(i, this.tmpM);
     });
     this.trainMesh.count = Math.min(200, cars.length);
@@ -558,7 +604,7 @@ export class Engine {
         this.selected = null;
         this.cb.onSelect(null);
       } else if (!this.tween) {
-        const p = v3([a.x, a.y], 1);
+        const p = v3([a.x, a.y], this.h(a.x, a.y) + 1);
         const delta = p.sub(this.controls.target);
         this.controls.target.add(delta);
         this.camera.position.add(delta);
@@ -636,7 +682,12 @@ export class Engine {
     this.night.value = 1 - day;
     const bg = SKY_NIGHT.clone().lerp(SKY_DAY, day).lerp(SKY_DUSK, dusk * 0.55);
     this.scene.background = bg;
-    (this.scene.fog as THREE.Fog).color.copy(bg);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(bg);
+    // Haze starts beyond what the camera is looking at, so aerial views stay crisp.
+    const d = this.camera.position.distanceTo(this.controls.target);
+    fog.near = d + (this.world?.radius ?? 600) * 1.2;
+    fog.far = fog.near + (this.world?.radius ?? 600) * 6;
   }
 
   private trackPerf(dt: number) {
@@ -705,7 +756,7 @@ export class Engine {
     const hit = this.pick(e, 'ground');
     if (!hit) return;
     this.clearRoadPreview();
-    const geom = new THREE.BufferGeometry().setFromPoints([v3(this.roadStart.p, 0.5), v3(hit.p, 0.5)]);
+    const geom = new THREE.BufferGeometry().setFromPoints([v3(this.roadStart.p, this.hp(this.roadStart.p) + 0.8), v3(hit.p, this.hp(hit.p) + 0.8)]);
     this.roadPreview = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x3fd3c3 }));
     this.scene.add(this.roadPreview);
   };

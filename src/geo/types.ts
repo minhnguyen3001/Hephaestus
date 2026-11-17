@@ -1,3 +1,5 @@
+import type { Terrain } from './terrain';
+
 /** Local planar coordinates in meters: x = east, y = north, relative to the world origin. */
 export type Vec2 = [number, number];
 
@@ -88,6 +90,7 @@ export interface WorldData {
   signalNodes: string[]; // OSM nodes tagged highway=traffic_signals
   fetchedAt: string;
   source: string;
+  terrain?: Terrain; // undefined = flat (no DEM or loading failed)
 }
 
 export interface Place {

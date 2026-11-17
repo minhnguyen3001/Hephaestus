@@ -37,10 +37,10 @@ export function buildingColor(b: Building, style: BuildingStyle): THREE.Color {
  * Extruded building: walls + flat roof, non-indexed so many can be merged into one draw call.
  * Attributes: aWall (1 = facade) and aFacade (meters along perimeter, meters up) drive the window shader.
  */
-export function buildingGeometry(b: Building, color: THREE.Color): THREE.BufferGeometry {
+export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THREE.BufferGeometry {
   let pts = b.footprint;
   if (signedArea(pts) < 0) pts = [...pts].reverse();
-  const h = b.height;
+  const h = base + b.height;
   const pos: number[] = [];
   const nrm: number[] = [];
   const col: number[] = [];
@@ -55,8 +55,8 @@ export function buildingGeometry(b: Building, color: THREE.Color): THREE.BufferG
     if (len < 1e-3) continue;
     const nx = (y2 - y1) / len;
     const nz = (x2 - x1) / len;
-    const A = [x1, 0, -y1], B = [x2, 0, -y2], C = [x2, h, -y2], D = [x1, h, -y1];
-    const fa = [u, 0], fb = [u + len, 0], fc = [u + len, h], fd = [u, h];
+    const A = [x1, base, -y1], B = [x2, base, -y2], C = [x2, h, -y2], D = [x1, h, -y1];
+    const fa = [u, 0], fb = [u + len, 0], fc = [u + len, b.height], fd = [u, b.height];
     for (const [p, f] of [[A, fa], [B, fb], [C, fc], [A, fa], [C, fc], [D, fd]] as const) {
       pos.push(...p);
       nrm.push(nx, 0, nz);
@@ -87,9 +87,25 @@ export function buildingGeometry(b: Building, color: THREE.Color): THREE.BufferG
   return g;
 }
 
-/** Flat ribbon along a polyline with mitered joints (roads, rails, routes). */
-export function ribbonGeometry(points: Vec2[], width: number, y: number, color: THREE.Color): THREE.BufferGeometry | null {
-  if (points.length < 2) return null;
+export type Height = number | ((p: Vec2) => number);
+const atH = (y: Height, p: Vec2) => (typeof y === 'number' ? y : y(p));
+
+/** Split long segments so draped geometry follows the terrain. */
+export function densify(points: Vec2[], maxSeg: number): Vec2[] {
+  const out: Vec2[] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const [ax, ay] = points[i - 1];
+    const [bx, by] = points[i];
+    const k = Math.ceil(Math.hypot(bx - ax, by - ay) / maxSeg);
+    for (let j = 1; j <= k; j++) out.push([ax + ((bx - ax) * j) / k, ay + ((by - ay) * j) / k]);
+  }
+  return out;
+}
+
+/** Ribbon along a polyline with mitered joints (roads, rails, routes), draped on a height function. */
+export function ribbonGeometry(rawPoints: Vec2[], width: number, y: Height, color: THREE.Color): THREE.BufferGeometry | null {
+  if (rawPoints.length < 2) return null;
+  const points = typeof y === 'number' ? rawPoints : densify(rawPoints, 12);
   const hw = width / 2;
   const L: Vec2[] = [];
   const R: Vec2[] = [];
@@ -112,7 +128,7 @@ export function ribbonGeometry(points: Vec2[], width: number, y: number, color: 
   if (L.length < 2) return null;
   const pos: number[] = [];
   for (let i = 1; i < L.length; i++) {
-    for (const q of [L[i - 1], R[i - 1], R[i], L[i - 1], R[i], L[i]]) pos.push(q[0], y, -q[1]);
+    for (const q of [L[i - 1], R[i - 1], R[i], L[i - 1], R[i], L[i]]) pos.push(q[0], atH(y, q), -q[1]);
   }
   return flatGeometry(pos, color);
 }
@@ -124,11 +140,11 @@ function normal(a: Vec2, b: Vec2): Vec2 | null {
   return l < 1e-6 ? null : [-dy / l, dx / l];
 }
 
-export function polygonGeometry(poly: Vec2[], y: number, color: THREE.Color): THREE.BufferGeometry | null {
+export function polygonGeometry(poly: Vec2[], y: Height, color: THREE.Color): THREE.BufferGeometry | null {
   if (poly.length < 3) return null;
   const tris = THREE.ShapeUtils.triangulateShape(poly.map((p) => new THREE.Vector2(p[0], p[1])), []);
   const pos: number[] = [];
-  for (const t of tris) for (const i of t) pos.push(poly[i][0], y, -poly[i][1]);
+  for (const t of tris) for (const i of t) pos.push(poly[i][0], atH(y, poly[i]), -poly[i][1]);
   return pos.length ? flatGeometry(pos, color) : null;
 }
 

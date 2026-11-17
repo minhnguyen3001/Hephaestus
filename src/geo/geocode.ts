@@ -40,5 +40,7 @@ export const FEATURED: (Place & { tagline: string })[] = [
   { name: 'District 1, Saigon', displayName: 'Ho Chi Minh City, Vietnam', lat: 10.7769, lon: 106.7009, countryCode: 'vn', tagline: 'A river of motorbikes' },
   { name: 'Amsterdam Centrum', displayName: 'Amsterdam, Netherlands', lat: 52.3731, lon: 4.8926, countryCode: 'nl', tagline: 'Canals, trams, bicycles' },
   { name: 'Shibuya', displayName: 'Tokyo, Japan', lat: 35.6595, lon: 139.7005, countryCode: 'jp', tagline: 'The world’s busiest crossing' },
+  { name: 'Nob Hill', displayName: 'San Francisco, USA', lat: 37.793, lon: -122.4161, countryCode: 'us', tagline: 'Cable-car hills down to the bay' },
+  { name: 'Central', displayName: 'Hong Kong', lat: 22.2817, lon: 114.1588, countryCode: 'hk', tagline: 'Skyscrapers against the Peak' },
   { name: 'City of London', displayName: 'London, United Kingdom', lat: 51.5138, lon: -0.0984, countryCode: 'gb', tagline: 'Medieval streets, glass towers' },
 ];

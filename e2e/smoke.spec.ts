@@ -65,3 +65,16 @@ test('load a real city, inspect, edit, undo, simulate', async ({ page }) => {
 
   expect(errors.filter((e) => !/favicon/.test(e))).toEqual([]);
 });
+
+test('hilly city loads real terrain', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Nob Hill/ }).click();
+  await expect(page.locator('.attribution')).toContainText('AWS Terrain Tiles', { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: 'test-results/07-terrain.png' });
+  await page.getByRole('button', { name: 'Street' }).click();
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: 'test-results/08-terrain-street.png' });
+});

@@ -164,3 +164,24 @@ describe('simulation', () => {
     for (let s = 0; s < 64; s++) expect(sim.signalState(inc[0], s) === 'green' && sim.signalState(perp, s) === 'green').toBe(false);
   });
 });
+
+describe('terrain', () => {
+  it('decodes Terrarium pixels and maps tiles', async () => {
+    const { decodeTerrarium, lonLatToTile } = await import('../geo/terrain');
+    expect(decodeTerrarium(128, 0, 0)).toBe(0);
+    expect(decodeTerrarium(128, 100, 128)).toBe(100.5);
+    const [x, y] = lonLatToTile(0, 0, 1);
+    expect([x, y]).toEqual([1, 1]);
+  });
+
+  it('builds a heightfield re-based at the origin and samples it bilinearly', async () => {
+    const { buildTerrain, sampleTerrain } = await import('../geo/terrain');
+    const proj = makeProjection(C);
+    // A plane rising 10 m per 100 m to the east, 50 m above sea level at the origin.
+    const t = buildTerrain(C, 500, 21, (lat, lon) => 50 + proj.toLocal(lat, lon)[0] * 0.1);
+    expect(sampleTerrain(t, 0, 0)).toBeCloseTo(0, 3);
+    expect(sampleTerrain(t, 200, -130)).toBeCloseTo(20, 1);
+    expect(sampleTerrain(t, 9999, 0)).toBeCloseTo(50, 1); // clamped at grid edge
+    expect(sampleTerrain(undefined, 5, 5)).toBe(0);
+  });
+});

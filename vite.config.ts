@@ -7,5 +7,5 @@ export default defineConfig({
     target: 'es2020',
     rollupOptions: { output: { manualChunks: { three: ['three'] } } },
   },
-  test: { environment: 'node' },
+  test: { environment: 'node', include: ['src/**/*.test.ts'] },
 } as never);
