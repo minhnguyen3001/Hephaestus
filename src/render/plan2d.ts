@@ -42,7 +42,8 @@ export class Plan2D implements WorldRenderer {
   private cx = 0;
   private cy = 0;
   private scale = 1; // px per meter
-  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true, underground: false };
+  private subwayPath = new Path2D();
   private treePath = new Path2D();
   private roadById = new Map<string, { path: Path2D; width: number }>();
   private fills: { color: string; path: Path2D }[] = [];
@@ -262,7 +263,8 @@ export class Plan2D implements WorldRenderer {
       this.treePath.arc(t.p[0], t.p[1], 2.4 * t.scale, 0, Math.PI * 2);
     }
     this.railPath = new Path2D();
-    for (const r of w.rails) if (!r.tunnel) this.railPath.addPath(this.linePath(r.points));
+    this.subwayPath = new Path2D();
+    for (const r of w.rails) (r.tunnel ? this.subwayPath : this.railPath).addPath(this.linePath(r.points));
   }
 
   private polyPath(pts: Vec2[]) {
@@ -452,6 +454,10 @@ export class Plan2D implements WorldRenderer {
     ctx.strokeStyle = '#5b5450';
     ctx.lineWidth = Math.max(2.4, 1.5 * px);
     ctx.stroke(this.railPath);
+    ctx.strokeStyle = this.layers.underground ? 'rgba(155,89,182,0.9)' : 'rgba(155,89,182,0.45)';
+    ctx.lineWidth = Math.max(2.4, (this.layers.underground ? 2.5 : 1.2) * px);
+    ctx.setLineDash([6 * px, 4 * px]);
+    ctx.stroke(this.subwayPath);
     ctx.setLineDash([]);
     for (const f of this.fills) {
       ctx.fillStyle = f.color;
@@ -521,6 +527,8 @@ export class Plan2D implements WorldRenderer {
     }
     ctx.fillStyle = '#c9ced6';
     for (const c of sim.trains) {
+      if (c.underground && !this.layers.underground) continue;
+      ctx.fillStyle = c.underground ? '#9b59b6' : '#c9ced6';
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.rotate(Math.atan2(c.hy, c.hx) - Math.PI / 2);

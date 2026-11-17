@@ -76,6 +76,7 @@ export interface Layers {
   estimated: boolean;
   traffic: boolean;
   trees: boolean;
+  underground: boolean;
 }
 
 const FREE = new THREE.Color(0x3cb371);
@@ -97,6 +98,7 @@ const PALETTES: Record<string, number[]> = {
   pedestrian: [0x34495e, 0xc0392b, 0x2980b9, 0x27ae60, 0x8e44ad, 0xf39c12, 0x7f8c8d, 0xecf0f1, 0x16a085],
 };
 const MAX_INSTANCES = 1100;
+const UNDER = 14; // tunnel depth below ground, meters
 const SKY_DAY = new THREE.Color(0xa8cbe8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
 const SKY_NIGHT = new THREE.Color(0x0b1322);
@@ -151,7 +153,9 @@ export class Engine implements WorldRenderer {
   private fastSeconds = 0;
   private quality: Quality;
   private pixelRatio: number;
-  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true, underground: false };
+  private undergroundGroup = new THREE.Group();
+  private groundMats: THREE.Material[] = [];
   private treeMesh?: THREE.InstancedMesh;
   private trafficT = 0;
   private signalPoles?: THREE.InstancedMesh;
@@ -197,7 +201,7 @@ export class Engine implements WorldRenderer {
     });
 
     this.buildingMat = this.makeBuildingMaterial();
-    this.scene.add(this.hemi, this.sun, this.sun.target, this.worldGroup, this.transitGroup, this.metroGroup, this.draftGroup);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.worldGroup, this.transitGroup, this.metroGroup, this.draftGroup, this.undergroundGroup);
     this.sun.castShadow = preset.shadows;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
@@ -264,6 +268,7 @@ export class Engine implements WorldRenderer {
     this.transitGroup.visible = l.transit;
     if (trafficOff) this.roads?.paint(() => null);
     if (this.treeMesh) this.treeMesh.visible = l.trees;
+    this.applyXray();
     this.trafficT = 99;
     if (restyle && this.world) this.buildStatic();
   }
@@ -421,6 +426,7 @@ export class Engine implements WorldRenderer {
       this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
       this.ground.receiveShadow = shadows;
       const skirt = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2).translate(0, t.min - 2, 0), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
+      skirt.userData.ground = true;
       this.worldGroup.add(this.ground, skirt);
     } else {
       this.ground = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcdc6b6, roughness: 1 }));
@@ -516,6 +522,16 @@ export class Engine implements WorldRenderer {
     this.buildings.mesh.userData.pick = 'building';
     this.worldGroup.add(this.buildings.mesh);
 
+    // Ground materials go translucent in x-ray mode so tunnels show through.
+    this.groundMats = [this.ground.material as THREE.Material];
+    this.worldGroup.children.forEach((o) => {
+      if (o.userData.ground && o !== this.ground) this.groundMats.push((o as THREE.Mesh).material as THREE.Material);
+    });
+    this.clearGroup(this.undergroundGroup);
+    const tunnels = w.rails.filter((r) => r.tunnel).map((r) => ribbonGeometry(r.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
+    if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
+    this.applyXray();
+
     const sc = this.sun.shadow.camera;
     sc.left = -r * 1.1;
     sc.right = r * 1.1;
@@ -531,6 +547,23 @@ export class Engine implements WorldRenderer {
       this.sun.shadow.map = null;
     }
     this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
+  }
+
+  private applyXray() {
+    const x = this.layers.underground;
+    this.undergroundGroup.visible = x;
+    for (const m of this.groundMats) {
+      m.transparent = x;
+      m.opacity = x ? 0.35 : 1;
+      m.depthWrite = !x;
+      m.needsUpdate = true;
+    }
+    if (this.ground?.parent) {
+      // the big flat skirt/disc meshes share userData.ground
+      this.worldGroup.children.forEach((o) => {
+        if (o.userData.ground) (o as THREE.Mesh).renderOrder = x ? 1 : 0;
+      });
+    }
   }
 
   /** Water is flat: the sea at the median coast height, lakes and rivers at their lowest shore. Parks drape. */
@@ -804,15 +837,17 @@ export class Engine implements WorldRenderer {
     }
     const cars = sim.trains;
     const s = new THREE.Vector3();
-    cars.forEach((c, i) => {
-      if (i >= 200) return;
+    let ti = 0;
+    cars.forEach((c) => {
+      if (ti >= 200 || (c.underground && !this.layers.underground)) return;
+      const i = ti++;
       s.set(1, 1, c.carLen);
-      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.color !== undefined ? 8.15 : c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
+      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.underground ? -UNDER + 0.2 : c.color !== undefined ? 8.15 : c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
       this.trainMesh.setMatrixAt(i, this.tmpM);
       this.trainMesh.setColorAt(i, this.tmpC.setHex(c.color ?? 0xc9ced6));
     });
     if (this.trainMesh.instanceColor) this.trainMesh.instanceColor.needsUpdate = true;
-    this.trainMesh.count = Math.min(200, cars.length);
+    this.trainMesh.count = ti;
     this.trainMesh.instanceMatrix.needsUpdate = true;
 
     if (this.followId !== null) {

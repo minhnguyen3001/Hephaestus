@@ -63,7 +63,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [perf, setPerf] = useState<Perf | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [quality, setQuality] = useState<QualitySetting>(readQuality);
-  const [layers, setLayers] = useState<Layers>({ agents: true, transit: true, estimated: false, traffic: false, trees: true });
+  const [layers, setLayers] = useState<Layers>({ agents: true, transit: true, estimated: false, traffic: false, trees: true, underground: false });
   const [running, setRunning] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [lineMode, setLineMode] = useState<'bus' | 'metro'>('bus');
@@ -417,6 +417,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         <label><input type="checkbox" checked={layers.traffic} onChange={(e) => setLayers({ ...layers, traffic: e.target.checked })} /> Traffic flow</label>
         <label><input type="checkbox" checked={layers.transit} onChange={(e) => setLayers({ ...layers, transit: e.target.checked })} /> Bus routes</label>
         <label title="Mapped OSM trees plus illustrative planting in parks"><input type="checkbox" checked={layers.trees} onChange={(e) => setLayers({ ...layers, trees: e.target.checked })} /> Trees <small className="muted">(park trees illustrative)</small></label>
+        <label><input type="checkbox" checked={layers.underground} onChange={(e) => setLayers({ ...layers, underground: e.target.checked })} /> Underground (x-ray)</label>
         <label><input type="checkbox" checked={layers.estimated} onChange={(e) => setLayers({ ...layers, estimated: e.target.checked })} /> Highlight estimated data</label>
       </div>
 

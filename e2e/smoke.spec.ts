@@ -234,3 +234,15 @@ test('interactive tour advances on real actions', async ({ page }) => {
   await page.getByRole('button', { name: 'Skip tour' }).click();
   await expect(page.locator('.tour')).toHaveCount(0);
 });
+
+test('underground x-ray shows subway tunnels', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByLabel('Underground (x-ray)').check();
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/17-underground.png' });
+});

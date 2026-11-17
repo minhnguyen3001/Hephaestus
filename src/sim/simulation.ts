@@ -121,6 +121,7 @@ interface TrainLine {
   cum: number[];
   len: number;
   elevated: boolean;
+  underground: boolean;
   kind: string;
 }
 
@@ -142,6 +143,7 @@ export interface TrainCar {
   elevated: boolean;
   carLen: number;
   color?: number;
+  underground?: boolean;
 }
 
 export interface SimStats {
@@ -482,13 +484,13 @@ export class Simulation {
   }
 
   private buildTrains(world: WorldData) {
-    const segs = world.rails.filter((r) => !r.tunnel);
+    const segs = world.rails;
     const byEnd = new Map<string, number[]>();
     segs.forEach((r, i) => {
       for (const n of [r.nodes[0], r.nodes[r.nodes.length - 1]]) byEnd.set(n, [...(byEnd.get(n) ?? []), i]);
     });
     const used = new Set<number>();
-    const chains: { pts: Vec2[]; elevated: boolean; kind: string }[] = [];
+    const chains: { pts: Vec2[]; elevated: boolean; kind: string; underground: boolean }[] = [];
     segs.forEach((seg, i) => {
       if (used.has(i)) return;
       used.add(i);
@@ -498,7 +500,7 @@ export class Simulation {
       for (const atEnd of [true, false]) {
         for (;;) {
           const end = atEnd ? nodes[nodes.length - 1] : nodes[0];
-          const next = (byEnd.get(end) ?? []).find((j) => !used.has(j) && segs[j].kind === seg.kind);
+          const next = (byEnd.get(end) ?? []).find((j) => !used.has(j) && segs[j].kind === seg.kind && segs[j].tunnel === seg.tunnel);
           if (next === undefined) break;
           used.add(next);
           const s = segs[next];
@@ -518,17 +520,20 @@ export class Simulation {
           }
         }
       }
-      chains.push({ pts, elevated, kind: seg.kind });
+      chains.push({ pts, elevated, kind: seg.kind, underground: seg.tunnel });
     });
-    const lines = chains
-      .map((c) => ({ ...c, len: polylineLength(c.pts) }))
-      .filter((c) => c.len > 400)
-      .sort((a, b) => b.len - a.len)
-      .slice(0, 8);
+    const longest = (under: boolean) =>
+      chains
+        .filter((c) => c.underground === under)
+        .map((c) => ({ ...c, len: polylineLength(c.pts) }))
+        .filter((c) => c.len > 400)
+        .sort((a, b) => b.len - a.len)
+        .slice(0, 8);
+    const lines = [...longest(false), ...longest(true)];
     for (const l of lines) {
       const cum = [0];
       for (let i = 1; i < l.pts.length; i++) cum.push(cum[i - 1] + dist(l.pts[i - 1], l.pts[i]));
-      this.lines.push({ pts: l.pts, cum, len: l.len, elevated: l.elevated, kind: l.kind });
+      this.lines.push({ pts: l.pts, cum, len: l.len, elevated: l.elevated, underground: l.underground, kind: l.kind });
       const tram = l.kind === 'tram';
       this.trains.push({
         line: this.lines.length - 1, s: this.rand() * l.len, dir: this.rand() < 0.5 ? 1 : -1, v: 0, dwell: 0,
@@ -958,6 +963,7 @@ export class Simulation {
           hy: ((b[1] - a[1]) / segLen) * t.dir,
           elevated: line.elevated,
           carLen: t.carLen,
+          underground: line.underground || undefined,
         });
       }
     }
