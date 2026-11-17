@@ -49,16 +49,18 @@ export function buildTerrain(center: LatLon, extent: number, n: number, elevatio
   const heights = new Float32Array(n * n);
   const step = (2 * extent) / (n - 1);
   const h0 = elevationAt(center.lat, center.lon);
-  let min = Infinity;
-  let max = -Infinity;
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
       const ll = proj.toLatLon([-extent + i * step, -extent + j * step]);
-      const h = elevationAt(ll.lat, ll.lon) - h0;
-      heights[j * n + i] = h;
-      min = Math.min(min, h);
-      max = Math.max(max, h);
+      heights[j * n + i] = elevationAt(ll.lat, ll.lon) - h0;
     }
+  }
+  despike(heights, n);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const h of heights) {
+    min = Math.min(min, h);
+    max = Math.max(max, h);
   }
   return { n, extent, heights, min, max };
 }
@@ -72,9 +74,11 @@ async function loadTile(x: number, y: number, signal?: AbortSignal): Promise<Ima
     if (!res.ok) throw new Error(`terrain ${res.status}`);
     await cache?.put(url, res.clone()).catch(() => undefined);
   }
-  const bmp = await createImageBitmap(await res.blob());
+  // Elevation is encoded in exact RGB bytes: the browser must not colour-manage or premultiply them,
+  // or a 1-step change in red becomes a 256 m spike.
+  const bmp = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
   const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(bmp.width, bmp.height) : Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
-  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  const ctx = canvas.getContext('2d', { colorSpace: 'srgb', willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   ctx.drawImage(bmp, 0, 0);
   return ctx.getImageData(0, 0, bmp.width, bmp.height);
 }
@@ -118,5 +122,29 @@ export async function fetchTerrain(center: LatLon, radius: number, signal?: Abor
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e;
     return undefined;
+  }
+}
+
+/**
+ * Remove isolated spikes and pits (bad DEM pixels): any sample more than 15 m away from the median
+ * of its neighbours is replaced by that median. Real slopes change gradually, so they are untouched.
+ */
+export function despike(h: Float32Array, n: number, threshold = 15) {
+  const src = h.slice();
+  const nb: number[] = [];
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      nb.length = 0;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const x = i + di;
+          const y = j + dj;
+          if (x >= 0 && y >= 0 && x < n && y < n) nb.push(src[y * n + x]);
+        }
+      nb.sort((a, b) => a - b);
+      const med = nb[nb.length >> 1];
+      if (Math.abs(src[j * n + i] - med) > threshold) h[j * n + i] = med;
+    }
   }
 }

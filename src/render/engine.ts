@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Area, Building, Road, Vec2, WorldData } from '../geo/types';
 import { sampleTerrain } from '../geo/terrain';
 import { treePoints } from '../geo/trees';
-import { centroid, dist, hash01 } from '../geo/util';
+import { centroid, dist } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { SavedView } from '../project/store';
 import { roadWidth } from '../sim/graph';
@@ -151,8 +151,6 @@ export class Engine implements WorldRenderer {
   private sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
   private hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7f6a, 0.9);
   private worldGroup = new THREE.Group();
-  private buildings?: PickMesh;
-  private roads?: PickMesh;
   private ground?: THREE.Mesh;
   private transitGroup = new THREE.Group();
   private metroGroup = new THREE.Group();
@@ -352,7 +350,7 @@ export class Engine implements WorldRenderer {
     const trafficOff = this.layers.traffic && !l.traffic;
     this.layers = l;
     this.transitGroup.visible = l.transit;
-    if (trafficOff) this.roads?.paint(() => null);
+    if (trafficOff) for (const c of this.roadChunks.values()) c.pick.paint(() => null);
     if (this.treeMesh) this.treeMesh.visible = l.trees;
     this.applyXray();
     this.trafficT = 99;
@@ -500,172 +498,252 @@ export class Engine implements WorldRenderer {
     g.clear();
   }
 
+  // ---------- incremental static scene ----------
+  // Each layer remembers the inputs it was built from and only rebuilds when they change. Buildings
+  // and roads live in ~300 m chunks, so an edit rebuilds one chunk instead of the whole city.
+  private layerDeps = new Map<string, unknown[]>();
+  private layers3d = new Map<string, THREE.Group>();
+  private buildingChunks = new Map<string, { deps: unknown[]; pick: PickMesh }>();
+  private roadChunks = new Map<string, { deps: unknown[]; pick: PickMesh }>();
+
+  private same(a: unknown[] | undefined, b: unknown[]) {
+    if (!a || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  /** Returns a fresh group for `name` if its deps changed, or null if the cached one is still valid. */
+  private layer(name: string, deps: unknown[]): THREE.Group | null {
+    if (this.same(this.layerDeps.get(name), deps) && this.layers3d.has(name)) return null;
+    this.layerDeps.set(name, deps);
+    const old = this.layers3d.get(name);
+    if (old) {
+      this.clearGroup(old);
+      this.worldGroup.remove(old);
+    }
+    const g = new THREE.Group();
+    this.layers3d.set(name, g);
+    this.worldGroup.add(g);
+    return g;
+  }
+
+  private chunkKey(p: Vec2) {
+    return `${Math.floor(p[0] / 300)},${Math.floor(p[1] / 300)}`;
+  }
+
+  private syncChunks<T>(
+    store: Map<string, { deps: unknown[]; pick: PickMesh }>, items: T[], keyOf: (t: T) => string, extra: unknown[],
+    build: (list: T[]) => PickMesh,
+  ) {
+    const groups = new Map<string, T[]>();
+    for (const it of items) {
+      const k = keyOf(it);
+      (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+    }
+    for (const [k, c] of store) {
+      if (groups.has(k)) continue;
+      this.worldGroup.remove(c.pick.mesh);
+      c.pick.dispose();
+      store.delete(k);
+    }
+    for (const [k, list] of groups) {
+      const deps = [...extra, ...list];
+      const cur = store.get(k);
+      if (cur && this.same(cur.deps, deps)) continue;
+      if (cur) {
+        this.worldGroup.remove(cur.pick.mesh);
+        cur.pick.dispose();
+      }
+      const pick = build(list);
+      store.set(k, { deps, pick });
+      this.worldGroup.add(pick.mesh);
+    }
+  }
+
   private buildStatic() {
     const w = this.world!;
-    this.clearGroup(this.worldGroup);
-    this.buildings?.dispose();
-    this.roads?.dispose();
     const shadows = PRESETS[this.quality].shadows;
     const r = w.radius;
-
     const t = w.terrain;
     const lift = this.lift;
+    const q = this.quality;
     this.buildDecks(w);
-    if (t) {
-      // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
-      const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, t.n - 1, t.n - 1).rotateX(-Math.PI / 2);
-      const pos = g.attributes.position;
-      const cols: number[] = [];
-      const inner = new THREE.Color(0xe6e0d3);
-      const outer = new THREE.Color(0xc9c2b1);
-      for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const y = -pos.getZ(i);
-        pos.setY(i, this.h(x, y));
-        const c = outer.clone().lerp(inner, THREE.MathUtils.smoothstep(r + 20 - Math.hypot(x, y), 0, 30));
-        cols.push(c.r, c.g, c.b);
+
+    const ground = this.layer('ground', [t, r, q]);
+    if (ground) {
+      if (t) {
+        // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
+        const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, t.n - 1, t.n - 1).rotateX(-Math.PI / 2);
+        const pos = g.attributes.position;
+        const cols: number[] = [];
+        const inner = new THREE.Color(0xe6e0d3);
+        const outer = new THREE.Color(0xc9c2b1);
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i);
+          const y = -pos.getZ(i);
+          pos.setY(i, this.h(x, y));
+          const c = outer.clone().lerp(inner, THREE.MathUtils.smoothstep(r + 20 - Math.hypot(x, y), 0, 30));
+          cols.push(c.r, c.g, c.b);
+        }
+        g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+        g.computeVertexNormals();
+        this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+        this.ground.receiveShadow = shadows;
+        const skirt = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2).translate(0, t.min - 2, 0), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
+        skirt.userData.ground = true;
+        ground.add(this.ground, skirt);
+      } else {
+        this.ground = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcdc6b6, roughness: 1 }));
+        this.ground.receiveShadow = shadows;
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 96).rotateX(-Math.PI / 2).translate(0, 0.02, 0), new THREE.MeshStandardMaterial({ color: 0xe6e0d3, roughness: 1 }));
+        disc.receiveShadow = shadows;
+        disc.userData.ground = true;
+        const ring = new THREE.Mesh(new THREE.RingGeometry(r - 2, r, 128).rotateX(-Math.PI / 2).translate(0, 0.05, 0), new THREE.MeshBasicMaterial({ color: 0x3a7bd5, transparent: true, opacity: 0.35 }));
+        ground.add(this.ground, disc, ring);
       }
-      g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-      g.computeVertexNormals();
-      this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-      this.ground.receiveShadow = shadows;
-      const skirt = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2).translate(0, t.min - 2, 0), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
-      skirt.userData.ground = true;
-      this.worldGroup.add(this.ground, skirt);
-    } else {
-      this.ground = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xcdc6b6, roughness: 1 }));
-      this.ground.receiveShadow = shadows;
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(r, 96).rotateX(-Math.PI / 2).translate(0, 0.02, 0), new THREE.MeshStandardMaterial({ color: 0xe6e0d3, roughness: 1 }));
-      disc.receiveShadow = shadows;
-      const ring = new THREE.Mesh(new THREE.RingGeometry(r - 2, r, 128).rotateX(-Math.PI / 2).translate(0, 0.05, 0), new THREE.MeshBasicMaterial({ color: 0x3a7bd5, transparent: true, opacity: 0.35 }));
-      this.worldGroup.add(this.ground, disc, ring);
-    }
-    this.ground.userData.ground = true;
-
-    const E = r * 1.3;
-    const areaColor = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
-    const areaGeoms = w.areas
-      .map((a) => polygonGeometry(a.polygon, this.areaHeight(a, E, lift), new THREE.Color(areaColor[a.kind]), a.holes))
-      .filter((g): g is THREE.BufferGeometry => !!g);
-    if (areaGeoms.length) {
-      const m = new THREE.Mesh(mergeGeometries(areaGeoms)!, this.flatMat);
-      m.receiveShadow = shadows;
-      m.userData.ground = true;
-      this.worldGroup.add(m);
+      this.ground.userData.ground = true;
+      const sc = this.sun.shadow.camera;
+      sc.left = -r * 1.1;
+      sc.right = r * 1.1;
+      sc.top = r * 1.1;
+      sc.bottom = -r * 1.1;
+      sc.near = 1;
+      sc.far = r * 6;
+      sc.updateProjectionMatrix();
+      const size = PRESETS[q].shadowSize;
+      if (size && this.sun.shadow.mapSize.x !== size) {
+        this.sun.shadow.mapSize.set(size, size);
+        this.sun.shadow.map?.dispose();
+        this.sun.shadow.map = null;
+      }
+      this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
     }
 
-    const roadItems: { id: string; geom: THREE.BufferGeometry }[] = [];
+    const areas = this.layer('areas', [t, r, ...w.areas]);
+    if (areas) {
+      const E = r * 1.3;
+      const areaColor = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
+      const geoms = w.areas
+        .map((a) => polygonGeometry(a.polygon, this.areaHeight(a, E, lift), new THREE.Color(areaColor[a.kind]), a.holes))
+        .filter((g): g is THREE.BufferGeometry => !!g);
+      if (geoms.length) {
+        const m = new THREE.Mesh(mergeGeometries(geoms)!, this.flatMat);
+        m.receiveShadow = shadows;
+        m.userData.ground = true;
+        areas.add(m);
+      }
+    }
+
     const mark = new THREE.Color(0xeae3c9);
-    for (const road of w.roads) {
-      if (road.tunnel) continue;
-      const color = new THREE.Color(ROAD_COLORS[road.kind]);
-      if (road.origin === 'proposed') color.lerp(new THREE.Color(0x3fd3c3), 0.45);
-      const ground = road.bridge ? (p: Vec2) => this.deckH(p[0], p[1]) : this.hp;
-      const g = ribbonGeometry(road.points, roadWidth(road), (p) => ground(p) + lift + ROAD_Y[road.kind], color);
-      if (g) roadItems.push({ id: road.id, geom: g });
-      if (road.bikeLane && road.kind !== 'footway' && road.kind !== 'cycleway') {
-        const hw = roadWidth(road) / 2 - 0.8;
-        for (const side of [-1, 1]) {
-          const b = ribbonGeometry(offsetLine(road.points, side * hw), 1.3, (p) => ground(p) + lift + ROAD_Y[road.kind] + 0.012, new THREE.Color(0x3fae6a));
-          if (b) roadItems.push({ id: `${road.id}#m`, geom: b });
+    this.syncChunks(this.roadChunks, w.roads.filter((rd) => !rd.tunnel), (rd) => this.chunkKey(rd.points[0]), [t, q], (list) => {
+      const items: { id: string; geom: THREE.BufferGeometry }[] = [];
+      for (const road of list) {
+        const color = new THREE.Color(ROAD_COLORS[road.kind]);
+        if (road.origin === 'proposed') color.lerp(new THREE.Color(0x3fd3c3), 0.45);
+        const gh = road.bridge ? (p: Vec2) => this.deckH(p[0], p[1]) : this.hp;
+        const g = ribbonGeometry(road.points, roadWidth(road), (p) => gh(p) + lift + ROAD_Y[road.kind], color);
+        if (g) items.push({ id: road.id, geom: g });
+        if (road.bikeLane && road.kind !== 'footway' && road.kind !== 'cycleway') {
+          const hw = roadWidth(road) / 2 - 0.8;
+          for (const side of [-1, 1]) {
+            const b = ribbonGeometry(offsetLine(road.points, side * hw), 1.3, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.012, new THREE.Color(0x3fae6a));
+            if (b) items.push({ id: `${road.id}#m`, geom: b });
+          }
+        }
+        if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
+          const c = ribbonGeometry(road.points, 0.18, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
+          if (c) items.push({ id: `${road.id}#m`, geom: c });
         }
       }
-      if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
-        const c = ribbonGeometry(road.points, 0.18, (p) => ground(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
-        if (c) roadItems.push({ id: `${road.id}#m`, geom: c });
-      }
-    }
-    this.roads = new PickMesh(roadItems, this.flatMat);
-    this.roads.mesh.receiveShadow = shadows;
-    this.roads.mesh.userData.pick = 'road';
-    this.worldGroup.add(this.roads.mesh);
+      const pick = new PickMesh(items, this.flatMat);
+      pick.mesh.receiveShadow = shadows;
+      pick.mesh.userData.pick = 'road';
+      pick.mesh.userData.chunk = pick;
+      return pick;
+    });
 
-    const railGeoms: THREE.BufferGeometry[] = [];
-    const pillars: THREE.Vector3[] = [];
-    for (const rail of w.rails) {
-      if (rail.tunnel) continue;
-      const y = (p: Vec2) => this.hp(p) + (rail.elevated ? 7 : 0.15 + lift);
-      const g = ribbonGeometry(rail.points, rail.kind === 'tram' ? 1.8 : 2.8, y, new THREE.Color(rail.elevated ? 0x5b5450 : 0x6f625a));
-      if (g) railGeoms.push(g);
-      if (rail.elevated) {
-        for (let i = 1; i < rail.points.length; i++) {
-          const a = rail.points[i - 1];
-          const b = rail.points[i];
-          const n = Math.floor(dist(a, b) / 25);
-          for (let k = 0; k <= n; k++) pillars.push(v3([a[0] + ((b[0] - a[0]) * k) / Math.max(1, n), a[1] + ((b[1] - a[1]) * k) / Math.max(1, n)]));
+    const rails = this.layer('rails', [t, q, w.rails]);
+    if (rails) {
+      const railGeoms: THREE.BufferGeometry[] = [];
+      const pillars: THREE.Vector3[] = [];
+      for (const rail of w.rails) {
+        if (rail.tunnel) continue;
+        const y = (p: Vec2) => this.hp(p) + (rail.elevated ? 7 : 0.15 + lift);
+        const g = ribbonGeometry(rail.points, rail.kind === 'tram' ? 1.8 : 2.8, y, new THREE.Color(rail.elevated ? 0x5b5450 : 0x6f625a));
+        if (g) railGeoms.push(g);
+        if (rail.elevated) {
+          for (let i = 1; i < rail.points.length; i++) {
+            const a = rail.points[i - 1];
+            const b = rail.points[i];
+            const n = Math.floor(dist(a, b) / 25);
+            for (let k = 0; k <= n; k++) pillars.push(v3([a[0] + ((b[0] - a[0]) * k) / Math.max(1, n), a[1] + ((b[1] - a[1]) * k) / Math.max(1, n)]));
+          }
         }
       }
-    }
-    if (railGeoms.length) {
-      const m = new THREE.Mesh(mergeGeometries(railGeoms)!, this.flatMat);
-      m.castShadow = shadows;
-      this.worldGroup.add(m);
-    }
-    if (pillars.length) {
-      const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x8b857d }), pillars.length);
-      pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p.setY(this.h(p.x, -p.z)))));
-      pm.castShadow = shadows;
-      this.worldGroup.add(pm);
+      if (railGeoms.length) {
+        const m = new THREE.Mesh(mergeGeometries(railGeoms)!, this.flatMat);
+        m.castShadow = shadows;
+        rails.add(m);
+      }
+      if (pillars.length) {
+        const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x8b857d }), pillars.length);
+        pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p.setY(this.h(p.x, -p.z)))));
+        pm.castShadow = shadows;
+        rails.add(pm);
+      }
     }
 
-    const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[this.quality]);
-    if (trees.length) {
-      const tm = new THREE.InstancedMesh(agentGeometry('tree'), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), trees.length);
-      const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
-      trees.forEach((t, i) => {
-        const [x, y] = t.p;
-        this.tmpM.makeRotationY(hash01(`${x}`) * 6.28).scale(new THREE.Vector3(t.scale, t.scale * (0.9 + hash01(`${y}`) * 0.3), t.scale)).setPosition(x, this.h(x, y) + lift, -y);
-        tm.setMatrixAt(i, this.tmpM);
-        tm.setColorAt(i, this.tmpC.setHex(greens[i % greens.length]));
-      });
-      tm.castShadow = shadows;
-      tm.visible = this.layers.trees;
-      this.treeMesh = tm;
-      this.worldGroup.add(tm);
-    } else this.treeMesh = undefined;
+    const treesG = this.layer('trees', [t, q, w.trees, ...w.areas]);
+    if (treesG) {
+      const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[q]);
+      if (trees.length) {
+        const tm = new THREE.InstancedMesh(agentGeometry('tree'), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), trees.length);
+        const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
+        const sc = new THREE.Vector3();
+        trees.forEach((tr, i) => {
+          const [x, y] = tr.p;
+          const k = ((x * 73.1 + y * 37.7) % 1 + 1) % 1; // cheap stable jitter
+          this.tmpM.makeRotationY(k * 6.28).scale(sc.set(tr.scale, tr.scale * (0.9 + k * 0.3), tr.scale)).setPosition(x, this.h(x, y) + lift, -y);
+          tm.setMatrixAt(i, this.tmpM);
+          tm.setColorAt(i, this.tmpC.setHex(greens[i % greens.length]));
+        });
+        tm.castShadow = shadows;
+        this.treeMesh = tm;
+        treesG.add(tm);
+      } else this.treeMesh = undefined;
+    }
+    if (this.treeMesh) this.treeMesh.visible = this.layers.trees;
 
-    for (const n of w.notes ?? []) this.worldGroup.add(noteMarker(n.text, v3(n.p, this.hp(n.p))));
+    const notes = this.layer('notes', [t, ...(w.notes ?? [])]);
+    if (notes) for (const n of w.notes ?? []) notes.add(noteMarker(n.text, v3(n.p, this.hp(n.p))));
 
     const style: BuildingStyle = { highlightEstimated: this.layers.estimated };
-    this.buildings = new PickMesh(
-      w.buildings.map((b) => ({ id: b.id, geom: buildingGeometry(b, buildingColor(b, style), this.base(b)) })),
-      this.buildingMat,
-    );
-    this.buildings.mesh.castShadow = shadows;
-    this.buildings.mesh.receiveShadow = shadows;
-    this.buildings.mesh.userData.pick = 'building';
-    this.worldGroup.add(this.buildings.mesh);
+    this.syncChunks(this.buildingChunks, w.buildings, (b) => this.chunkKey(b.footprint[0]), [t, q, this.layers.estimated], (list) => {
+      const pick = new PickMesh(list.map((b) => ({ id: b.id, geom: buildingGeometry(b, buildingColor(b, style), this.base(b)) })), this.buildingMat);
+      pick.mesh.castShadow = shadows;
+      pick.mesh.receiveShadow = shadows;
+      pick.mesh.userData.pick = 'building';
+      pick.mesh.userData.chunk = pick;
+      return pick;
+    });
+
+    const tunnelRoads = w.roads.filter((rd) => rd.tunnel && rd.kind !== 'footway' && rd.kind !== 'cycleway');
+    if (this.layer('underground', [t, w.rails, ...tunnelRoads])) {
+      this.clearGroup(this.undergroundGroup);
+      const tunnels = w.rails.filter((rl) => rl.tunnel).map((rl) => ribbonGeometry(rl.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
+      for (const rd of tunnelRoads) {
+        const g = ribbonGeometry(rd.points, roadWidth(rd), (p) => this.hp(p) - ROAD_TUNNEL, new THREE.Color(0x5a6270));
+        if (g) tunnels.push(g);
+      }
+      if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
+    }
 
     // Ground materials go translucent in x-ray mode so tunnels show through.
-    this.groundMats = [this.ground.material as THREE.Material];
-    this.worldGroup.children.forEach((o) => {
-      if (o.userData.ground && o !== this.ground) this.groundMats.push((o as THREE.Mesh).material as THREE.Material);
+    this.groundMats = [];
+    this.worldGroup.traverse((o) => {
+      if (o.userData.ground) this.groundMats.push((o as THREE.Mesh).material as THREE.Material);
     });
-    this.clearGroup(this.undergroundGroup);
-    const tunnels = w.rails.filter((r) => r.tunnel).map((r) => ribbonGeometry(r.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
-    for (const r of w.roads) {
-      if (!r.tunnel || r.kind === 'footway' || r.kind === 'cycleway') continue;
-      const g = ribbonGeometry(r.points, roadWidth(r), (p) => this.hp(p) - ROAD_TUNNEL, new THREE.Color(0x5a6270));
-      if (g) tunnels.push(g);
-    }
-    if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
     this.applyXray();
-
-    const sc = this.sun.shadow.camera;
-    sc.left = -r * 1.1;
-    sc.right = r * 1.1;
-    sc.top = r * 1.1;
-    sc.bottom = -r * 1.1;
-    sc.near = 1;
-    sc.far = r * 6;
-    sc.updateProjectionMatrix();
-    const size = PRESETS[this.quality].shadowSize;
-    if (size && this.sun.shadow.mapSize.x !== size) {
-      this.sun.shadow.mapSize.set(size, size);
-      this.sun.shadow.map?.dispose();
-      this.sun.shadow.map = null;
-    }
-    this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
   }
 
   private applyXray() {
@@ -679,7 +757,7 @@ export class Engine implements WorldRenderer {
     }
     if (this.ground?.parent) {
       // the big flat skirt/disc meshes share userData.ground
-      this.worldGroup.children.forEach((o) => {
+      this.worldGroup.traverse((o) => {
         if (o.userData.ground) (o as THREE.Mesh).renderOrder = x ? 1 : 0;
       });
     }
@@ -921,14 +999,16 @@ export class Engine implements WorldRenderer {
 
   private updateTraffic(dt: number) {
     this.trafficT += dt;
-    if (!this.layers.traffic || this.trafficT < 1 || !this.roads || !this.sim) return;
+    if (!this.layers.traffic || this.trafficT < 1 || !this.sim) return;
     this.trafficT = 0;
     const speeds = this.sim.roadSpeed;
     const c = new THREE.Color();
-    this.roads.paint((id) => {
-      const r = speeds.get(id);
-      return r === undefined ? null : trafficColor(r, c);
-    });
+    for (const ch of this.roadChunks.values()) {
+      ch.pick.paint((id) => {
+        const r = speeds.get(id);
+        return r === undefined ? null : trafficColor(r, c);
+      });
+    }
   }
 
   private refreshSelection() {
@@ -1241,27 +1321,68 @@ export class Engine implements WorldRenderer {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
+    const ray = this.raycaster.ray;
+    const groundT = this.groundT(ray);
     const targets: THREE.Object3D[] = [];
     if (what !== 'ground') {
       if (what === 'all' && this.layers.agents) for (const k of AGENT_KINDS) if (this.agentMeshes[k].count) {
         this.agentMeshes[k].computeBoundingSphere();
         targets.push(this.agentMeshes[k]);
       }
-      if (this.buildings) targets.push(this.buildings.mesh);
-      if (this.roads) targets.push(this.roads.mesh);
+      // only chunks whose bounds the ray passes near (and in front of the ground hit) are tested
+      for (const store of [this.buildingChunks, this.roadChunks]) {
+        for (const c of store.values()) {
+          const g = c.pick.mesh.geometry;
+          if (!g.boundingSphere) g.computeBoundingSphere();
+          const bs = g.boundingSphere!;
+          if (ray.distanceSqToPoint(bs.center) <= bs.radius * bs.radius && ray.origin.distanceTo(bs.center) - bs.radius <= groundT) targets.push(c.pick.mesh);
+        }
+      }
     }
-    if (this.ground) targets.push(this.ground);
-    const hit = this.raycaster.intersectObjects(targets, false)[0];
-    if (!hit) return null;
+    const hit = targets.length ? this.raycaster.intersectObjects(targets, false)[0] : undefined;
+    if (!hit || hit.distance > groundT) {
+      if (!Number.isFinite(groundT)) return null;
+      const gp = ray.at(groundT, new THREE.Vector3());
+      return { kind: 'ground' as const, id: '', p: [gp.x, -gp.z] as Vec2 };
+    }
     const p: Vec2 = [hit.point.x, -hit.point.z];
     const o = hit.object;
     if (o instanceof THREE.InstancedMesh && hit.instanceId !== undefined) {
       const a = this.agentSlots[o.userData.kind as AgentKind][hit.instanceId];
       if (a) return { kind: 'agent' as const, id: a.id, p };
     }
-    if (o === this.buildings?.mesh && hit.faceIndex != null) return { kind: 'building' as const, id: this.buildings.idAt(hit.faceIndex)!, p };
-    if (o === this.roads?.mesh && hit.faceIndex != null) return { kind: 'road' as const, id: this.roads.idAt(hit.faceIndex)!.replace(/#m$/, ''), p };
+    const chunk = o.userData.chunk as PickMesh | undefined;
+    if (chunk && hit.faceIndex != null) {
+      const id = chunk.idAt(hit.faceIndex)!;
+      return o.userData.pick === 'building' ? { kind: 'building' as const, id, p } : { kind: 'road' as const, id: id.replace(/#m$/, ''), p };
+    }
     return { kind: 'ground' as const, id: '', p };
+  }
+
+  /** Distance along the ray to the terrain, by stepping through the heightfield (no triangle tests). */
+  private groundT(ray: THREE.Ray): number {
+    const o = ray.origin;
+    const d = ray.direction;
+    if (!this.world?.terrain) return d.y < -1e-6 ? -o.y / d.y : Infinity;
+    let prev = 0;
+    for (let t = 0; t < 20000; ) {
+      const x = o.x + d.x * t;
+      const z = o.z + d.z * t;
+      const above = o.y + d.y * t - this.h(x, -z);
+      if (above <= 0) {
+        let lo = prev;
+        let hi = t;
+        for (let k = 0; k < 20; k++) {
+          const m = (lo + hi) / 2;
+          if (o.y + d.y * m - this.h(o.x + d.x * m, -(o.z + d.z * m)) > 0) lo = m;
+          else hi = m;
+        }
+        return hi;
+      }
+      prev = t;
+      t += Math.max(1, above * 0.5);
+    }
+    return Infinity;
   }
 
   private handleClick(e: PointerEvent) {

@@ -447,4 +447,16 @@ describe('terrain', () => {
     expect(sampleTerrain(t, 9999, 0)).toBeCloseTo(50, 1); // clamped at grid edge
     expect(sampleTerrain(undefined, 5, 5)).toBe(0);
   });
+
+  it('removes single-pixel spikes but keeps real slopes', async () => {
+    const { buildTerrain, sampleTerrain } = await import('../geo/terrain');
+    const proj = makeProjection(C);
+    // a steady 10% slope with one bad +256 m sample (the classic colour-shift artefact)
+    const t = buildTerrain(C, 500, 21, (lat, lon) => {
+      const [x, y] = proj.toLocal(lat, lon);
+      return Math.abs(x - 100) < 1 && Math.abs(y - 100) < 1 ? 256 + x * 0.1 : x * 0.1;
+    });
+    expect(sampleTerrain(t, 100, 100)).toBeCloseTo(10, 0);
+    expect(sampleTerrain(t, 300, 0)).toBeCloseTo(30, 0);
+  });
 });
