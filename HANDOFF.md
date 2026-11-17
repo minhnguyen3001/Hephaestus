@@ -34,7 +34,7 @@ Config: none needed. There are no env vars or API keys. External services: publi
 ## Git state
 - Remote: `origin` → github.com/minhnguyen3001/Hephaestus.
 - Branch: `feat/phase1-foundation`, created from `main`, which holds only the initial commit. Not merged yet.
-- See `git log` for the latest commit. Push status is reported at the end of each session below.
+- Session 1 ended at commit `9c24ad8` (Phase 1 foundation) plus this handoff update. Both are **pushed**. The working tree is clean apart from the gitignored `graphify-out/`, `dist/` and `test-results/`.
 
 ## Testing state
 - `npm test`: 11/11 passing (geo parsing, provenance, routing, one-way, edits/undo, demand curve, regions, agents move and complete trips, signal phases never conflict).
