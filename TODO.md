@@ -11,13 +11,12 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [ ] Product name: keep "Global City Simulator", or adopt "Hephaestus" or another brand.
 
 ## P0
-- [ ] Packs still missing: Chicago Loop, District 1 Saigon, Amsterdam Centrum (public Overpass timeouts; builder now retries). Re-run: `npx tsx scripts/build-city-packs.ts "Chicago Loop"`
+- [ ] Amsterdam pack (building). Rebuild older packs to include stations and trees (live fallback works meanwhile)
 - [ ] Real-device QA (old Windows laptop with integrated GPU, iPad, Android phone, Safari). Note: 3D High in headless SwiftShader costs ~150 ms/frame; verify on real GPUs
 
 ## P1
-- [ ] Subway stations from OSM, so subway trains stop at them; bike lanes in the road editor
-- [ ] Emergency vehicles (ambulance, police, fire) with priority
-- [ ] Transit: transfers between lines; real GTFS where free feeds exist; line headway editing
+- [ ] Bike lanes in the road editor
+- [ ] Transit: real GTFS where free feeds exist; line headway editing; route colours from OSM relations
 
 ## P2
 - [ ] Facade variety by region; more roof shapes (hipped, flat with parapets)
@@ -25,7 +24,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [ ] Larger areas: tiled loading around the camera (now: "load the city here" opens a new area)
 - [ ] Geometry build in a worker (ready time is 8–12 s under 4× CPU throttle)
 - [ ] Parking, taxis picking up and dropping off
-- [ ] Weekend and holiday demand profiles; events (road closure, concert)
+- [ ] Special events (concert/stadium surges); public holiday profile
 - [ ] Network-based walk isochrones (current access metrics use straight-line distance)
 - [ ] Grow the pack pipeline: GitHub Action (free minutes) to rebuild packs on a schedule
 
@@ -33,8 +32,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [ ] Accounts, cloud save, sharing, permissions (needs free-tier backend, e.g. Supabase free, if approved)
 - [ ] Real-time collaboration
 - [ ] Load testing (only meaningful once there is a backend)
-- [ ] Planning challenges (goal-based scenarios)
-- [ ] Optional AI planning assistant (pluggable, not required)
+- [ ] Optional LLM phrasing for the advisor (pluggable; the rule-based advisor works offline and for free)
 - [ ] WebGPU renderer path
 
 ## Known bugs / tech debt
@@ -60,4 +58,6 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [x] Weekday/weekend demand; +5/10/20-year projections with stated growth assumptions
 - [x] Interactive onboarding tour; phone layout test; bridge decks; duplicate building; load-the-city-here
 - [x] Performance doc with throttled measurements (main thread 0.8 ms/frame in 2D, 1.4 ms in 3D Low)
-- [x] 29 unit tests; 12 e2e scenarios + perf benchmark
+- [x] Emergency vehicles; transit transfers; real OSM rail/subway lines with stations and riders
+- [x] Planning challenges; rule-based advisor with fly-to; note pins (travel in share links); weather
+- [x] 35 unit tests; ~19 e2e scenarios + phone layout + perf benchmark

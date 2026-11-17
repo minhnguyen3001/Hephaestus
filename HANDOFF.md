@@ -9,25 +9,20 @@ Last updated: 2026-11-17 (session 1, later). The owner runs this project autonom
 4. Continue with **Next actions**. Rationale for past choices is in `docs/DECISIONS.md`.
 
 ## Project state
-Phase 1 is done, and much of Phases 2–3 too. A user can:
-- Search or pick a featured city. Featured cities load from static packs.
-- Explore a real 3D city on real terrain, or the 2D plan view.
-- Edit buildings and roads (new roads form intersections), and draw bus and elevated metro lines.
-- Watch a living simulation: lanes, signals, buses, trains and riders.
-- Compare the original and proposed city in the dashboard, with a traffic flow layer.
-- Rely on autosave, which keeps projects locally.
+A broad, working product. A user can:
+- Search or pick a featured city. Packs exist for Shibuya, Manhattan, SF Nob Hill, HK Central, City of London, Chicago Loop and Saigon D1; Amsterdam is in progress. Other places load live from free Overpass.
+- Explore real 3D: terrain, sea from coastlines, relations, trees, pitched roofs, bridge decks, an underground x-ray, and weather. Or use the 2D plan view.
+- Edit the plan: buildings, roads (which form intersections), the road properties editor, zoning, bus and elevated metro lines, and note pins. Multiple scenarios with comparison. Undo/redo, autosave, share links (`#plan=`).
+- Watch the simulation, which runs in a worker:
+  - OD trips and regional modes.
+  - Lanes, signals (with pedestrians obeying them) and spill-back.
+  - Emergency vehicles.
+  - Buses and user metros with riders and transfers, plus **real OSM rail/subway lines that stop at mapped stations and carry riders**.
+  - Weekday/weekend, +5/10/20-year projections, and weather.
+- Read the dashboard: before/after metrics, access indicators, live traffic, per-line ridership, the traffic flow layer, the **rule-based planning advisor** with fly-to, and **planning challenges** with live goals.
+- Take the interactive tour, use the phone layout, and switch graphics quality (Auto/Low/Medium/High).
 
-Since then, a user can also:
-- Keep several named scenarios per project and compare them side by side.
-- Share a plan as a link (`#plan=…`). No server is involved.
-- Zone areas, which fill with buildings automatically.
-- Edit road properties.
-- Toggle weekday and weekend demand, and project +5, +10 and +20 years.
-- Use the underground x-ray view.
-- See trees, pitched roofs and bridge decks.
-- Follow an interactive tour.
-
-Not built yet: accounts, collaboration, and any backend (deferred: zero cost); transit transfers; emergency vehicles; subway stations.
+Not built: any backend (accounts, cloud save, real-time collaboration). It's deferred because of the zero-cost constraint; share links and notes cover sharing for now.
 
 ## Technical map
 | Area | Files |
@@ -41,6 +36,7 @@ Not built yet: accounts, collaboration, and any backend (deferred: zero cost); t
 | Rendering | `src/render/engine.ts` (3D Engine implements WorldRenderer), `src/render/plan2d.ts` (2D), `src/render/tools.ts` (shared ToolController), `src/render/geometry.ts`, `src/render/palette.ts`, `src/render/quality.ts` |
 | UI | `src/ui/WorldView.tsx` (state owner), `src/ui/Panels.tsx`, `src/ui/Tour.tsx`, `src/ui/Landing.tsx`, `src/ui/SearchBox.tsx`, `src/ui/metrics.ts` |
 | Planning | `src/project/zoning.ts` (zone → buildings/park), `src/project/share.ts` (URL codec), `src/geo/trees.ts` |
+| Insight | `src/ui/advisor.ts` (rule-based advisor), `src/ui/challenges.ts` (goals), `src/ui/metrics.ts` (capacity, access; grid proximity via `makeNear`) |
 | Tests | `src/sim/sim.test.ts`, `src/geo/polygons.test.ts`, `e2e/smoke.spec.ts` |
 
 Contract: React owns project, history and view state. It calls `renderer.setWorld(world, region)`, and renderers report through `EngineCallbacks`. Renderers rebuild the simulation only when roads, region or transit lines change.
@@ -50,18 +46,18 @@ Contract: React owns project, history and view state. It calls `renderer.setWorl
 - Workflow: commit on `main` (or a short-lived branch, fast-forwarded), push immediately.
 
 ## Testing state
-- `npm test`: 29/29 passing.
-- `npx playwright test`: 12 scenarios in `e2e/smoke.spec.ts` plus `e2e/mobile.spec.ts`; all pass. The Chicago scenario uses live Overpass until its pack exists, so it can time out when public servers are busy.
+- `npm test`: 35/35 passing.
+- `npx playwright test`: about 19 scenarios in `e2e/smoke.spec.ts` plus `e2e/mobile.spec.ts`; all passing at last run. Some use live station and terrain queries (fast). Live-only cities can time out when public servers are busy.
 - `npx playwright test e2e/perf.spec.ts`: throttled benchmark → `test-results/perf.json` (see docs/PERFORMANCE.md).
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader runs at about 1–15 fps, which says nothing about real GPU performance.
 
 ## Next actions
-1. Finish the missing packs (Chicago, Saigon, Amsterdam): `npx tsx scripts/build-city-packs.ts "<name>"`.
-2. Emergency vehicles with priority (P1).
-3. Transit transfers; subway stations from OSM.
-4. Planning challenges (goal-based scenarios).
-5. Geometry build in a worker (faster ready time).
-6. Real-device QA notes.
+1. Finish the Amsterdam pack. Optionally rebuild older packs so they include stations and trees (live fallback works meanwhile).
+2. Geometry build in a worker (faster time to ready; 6–14 s under 4× throttle).
+3. Parking and taxi pickup; special events (concert/stadium surges).
+4. Facade variety by region; road tunnels.
+5. Real-device QA notes (needs the owner or real hardware).
+6. Zero-cost hosting once the owner decides (public repo + GitHub Pages, or a free static host).
 
 ## Owner decisions
 - Approved: the master brief; **zero cost**; **automatic GitHub operations**; continuous autonomous work.
