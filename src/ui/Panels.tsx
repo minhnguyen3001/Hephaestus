@@ -342,6 +342,7 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
             <Metric label="Transit boardings" value={fmt(stats.busRiders)} />
             <Metric label="Waiting at stops" value={fmt(stats.waitingAtStops)} />
             <Metric label="Transfers" value={fmt(stats.transfers)} />
+            <Metric label="Cruising for parking" value={fmt(stats.cruising)} warn={stats.cruising > 20} />
           </div>
           <div className="kinds">
             {AGENT_KINDS.map((k) => (

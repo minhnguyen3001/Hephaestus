@@ -52,7 +52,7 @@ Contract: React owns project, history and view state. It calls `renderer.setWorl
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader runs at about 1–15 fps, which says nothing about real GPU performance.
 
 ## Next actions
-1. Parking search and taxi pickup behaviour (P2).
+1. (done) Parking search and taxi pickups.
 2. (done) Road tunnels.
 3. More roof shapes; regional facade palettes.
 4. Public holiday profile; stadium event presets from OSM.

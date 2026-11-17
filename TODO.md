@@ -21,7 +21,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [x] Road tunnels: in the network, rendered in x-ray, agents shown underground
 - [ ] Larger areas: tiled loading around the camera (now: "load the city here" opens a new area)
 - [ ] ~~Geometry build in a worker~~ not needed: profiling (`scripts/profile-load.ts`) shows the full data pipeline is ~160 ms; terrain no longer blocks first render
-- [ ] Parking, taxis picking up and dropping off
+- [x] Parking search (garages preferred) and taxi pickups
 - [ ] Public holiday demand profile; auto-detect stadiums from OSM for event presets
 - [ ] Network-based walk isochrones (current access metrics use straight-line distance)
 - [ ] Grow the pack pipeline: GitHub Action (free minutes) to rebuild packs on a schedule

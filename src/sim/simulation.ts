@@ -7,7 +7,7 @@ const CYCLE = 64;
 
 export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus' | 'emergency';
 export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus', 'emergency'];
-export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service' | 'emergency call' | 'event';
+export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service' | 'emergency call' | 'event' | 'to pickup' | 'looking for parking' | 'to parking garage';
 
 export interface Agent {
   id: number;
@@ -34,11 +34,15 @@ export interface Agent {
   hx: number;
   hy: number;
   under: boolean; // inside a road tunnel
+  pickupAt?: number; // taxi: path index where the passenger is picked up
+  realPurpose?: Purpose;
+  parked?: boolean; // parking search already done
 }
 
 interface Site {
   label: string;
   station?: boolean; // hospital / civic building that dispatches emergency vehicles
+  parking?: boolean; // parking garage / lot
   c: Vec2;
   residents: number;
   jobs: number;
@@ -170,6 +174,7 @@ export interface SimStats {
   congestion: number;
   busRiders: number; // transit boardings
   transfers: number;
+  cruising: number; // cars searching for parking right now
   waitingAtStops: number;
   lines: LineStats[];
   residents: number;
@@ -352,7 +357,7 @@ export class Simulation {
     for (const b of world.buildings) {
       const cap = buildingCapacity(b);
       const c = centroid(b.footprint);
-      this.sites.push({ label: b.name ?? `${b.use} building`, c, ...cap, carNode: -1, walkNode: -1, station: b.use === 'health' || b.use === 'civic' });
+      this.sites.push({ label: b.name ?? `${b.use} building`, c, ...cap, carNode: -1, walkNode: -1, station: b.use === 'health' || b.use === 'civic', parking: b.use === 'parking' });
     }
     for (const a of world.areas) {
       if (a.kind !== 'park') continue;
@@ -806,6 +811,7 @@ export class Simulation {
     let p: Purpose = purpose;
     let to = d.label;
     let rider: Rider | undefined;
+    let pickup: number | undefined;
     let stopId: number | undefined;
     if (mode === 'bus') {
       const plan = this.planTransit(o, d);
@@ -835,6 +841,16 @@ export class Simulation {
       kind = mode;
       if (o.carNode < 0 || d.carNode < 0) return false;
       path = g.route(o.carNode, d.carNode, 'car');
+      // Taxis and ride-hail cars first drive empty to the passenger.
+      if (kind === 'taxi' && path?.length && this.filled) {
+        const start = this.nodeNear(g.nodes[o.carNode].p, 300, 900);
+        const pre = start >= 0 ? g.route(start, o.carNode, 'car') : null;
+        if (pre?.length) {
+          const a0 = path;
+          path = [...pre, ...a0];
+          pickup = pre.length;
+        }
+      }
     }
     if (!path || path.length === 0) return false;
     const a = this.newAgent(kind, p, path);
@@ -842,6 +858,11 @@ export class Simulation {
     a.to = to;
     a.rider = rider;
     a.stopId = stopId;
+    if (pickup !== undefined) {
+      a.pickupAt = pickup;
+      a.realPurpose = p;
+      a.purpose = 'to pickup';
+    }
     if (!this.filled) {
       a.pi = Math.floor(this.rand() * path.length);
       a.s = this.rand() * g.edges[path[a.pi]].len;
@@ -978,6 +999,13 @@ export class Simulation {
     while (!a.done && a.s >= g.edges[a.path[a.pi]].len) {
       a.s -= g.edges[a.path[a.pi]].len;
       a.pi++;
+      if (a.pickupAt === a.pi) {
+        a.dwell = 12; // passenger gets in
+        a.s = 0;
+        a.purpose = a.realPurpose ?? a.purpose;
+        a.pickupAt = undefined;
+        break;
+      }
       if (a.pi >= a.path.length) {
         if (a.bus) {
           const line = this.transit[a.bus.line];
@@ -1013,7 +1041,50 @@ export class Simulation {
     this.agents.push(a);
   }
 
+  /** A random car-network node between rmin and rmax meters from p (or -1). */
+  private nodeNear(p: Vec2, rmin: number, rmax: number): number {
+    const g = this.graph;
+    for (let k = 0; k < 12; k++) {
+      const ang = this.rand() * Math.PI * 2;
+      const r = rmin + this.rand() * (rmax - rmin);
+      const n = g.nearestNode([p[0] + Math.cos(ang) * r, p[1] + Math.sin(ang) * r], 'car', 3);
+      if (n >= 0 && dist(g.nodes[n].p, p) >= rmin * 0.6) return n;
+    }
+    return -1;
+  }
+
+  private jobsNear(p: Vec2): number {
+    let j = 0;
+    for (const s of this.sites) if (Math.abs(s.c[0] - p[0]) < 250 && Math.abs(s.c[1] - p[1]) < 250) j += s.jobs;
+    return j;
+  }
+
+  /** Private cars arriving where jobs are dense either head for a nearby garage or cruise for a space. */
+  private parkOrArrive(a: Agent): boolean {
+    if (a.kind !== 'car' || a.parked || a.purpose === 'delivery') return false;
+    a.parked = true;
+    const g = this.graph;
+    const end = g.edges[a.path[a.path.length - 1]].to;
+    const p = g.nodes[end].p;
+    const garage = this.sites.find((s) => s.parking && s.carNode >= 0 && dist(s.c, p) < 250);
+    let ext: number[] | null = null;
+    if (garage) {
+      ext = g.route(end, garage.carNode, 'car');
+      a.purpose = 'to parking garage';
+    } else if (this.rand() < Math.min(0.7, this.jobsNear(p) / 3000)) {
+      const n = this.nodeNear(p, 150, 400);
+      ext = n >= 0 ? g.route(end, n, 'car') : null;
+      a.purpose = 'looking for parking';
+    }
+    if (!ext?.length) return false;
+    a.path = ext;
+    a.pi = 0;
+    a.s = 0;
+    return true;
+  }
+
   private arrive(a: Agent) {
+    if (this.parkOrArrive(a)) return;
     a.done = true;
     if (a.rider && a.stopId !== undefined) this.stops[a.stopId].waiting.push(a.rider);
     else this.tripsCompleted++;
@@ -1206,6 +1277,7 @@ export class Simulation {
       congestion: vN ? slow / vN : 0,
       busRiders: this.busRiders,
       transfers: this.transfers,
+      cruising: this.agents.filter((a) => a.purpose === 'looking for parking').length,
       waitingAtStops: waiting,
       lines: this.lineStats(),
       residents: Math.round(this.totals.residents),

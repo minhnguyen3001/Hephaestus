@@ -269,6 +269,20 @@ describe('simulation', () => {
     expect(sim.agents.some((a) => a.purpose === 'event' && a.from === 'Concert')).toBe(true);
   });
 
+  it('taxis pick up passengers and drivers cruise for parking downtown', () => {
+    const w = gridFixture(200);
+    const sim = new Simulation(w, { ...profileFor('us'), modeShare: { car: 0.5, taxi: 0.5, motorcycle: 0, bicycle: 0, bus: 0, walk: 0 } }, 200, 6);
+    let pickups = 0;
+    let cruising = 0;
+    for (let i = 0; i < 40; i++) {
+      sim.step(15);
+      pickups += sim.agents.filter((a) => a.purpose === 'to pickup').length;
+      cruising += sim.stats().cruising;
+    }
+    expect(pickups).toBeGreaterThan(0);
+    expect(cruising).toBeGreaterThan(0);
+  });
+
   it('dispatches emergency vehicles from hospitals and civic buildings', () => {
     const w = gridFixture();
     w.buildings[0] = { ...w.buildings[0], use: 'health', name: 'General Hospital' };
