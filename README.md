@@ -8,22 +8,32 @@ A browser-based 3D city-building and urban-planning simulator built on **real-wo
 
 ## What works today
 
-- **Global search** for cities, streets, landmarks, or `lat, lon` coordinates (OpenStreetMap Nominatim).
-- **Real-world 3D city** loaded live from OpenStreetMap: building footprints and heights, roads with lanes, water, parks, rail and elevated rail.
-- **Honest data labels**: each building shows whether its height was *measured*, *derived from floor count*, *estimated*, or *changed by you*. A layer highlights all estimated data.
-- **360° camera**: orbit, tilt, pan, zoom (mouse, touch, keyboard), aerial, district and street-level presets, double-click to orbit any building, follow any vehicle or person.
-- **Planning tools**: place buildings, draw roads (snapping to intersections), bulldoze buildings and roads, change height and land use, undo and redo.
-- **Scenarios**: real-world data stays untouched. Your proposal is a list of edits you can toggle against the **Original** city at any time. Projects autosave locally.
-- **Living city simulation** (synthetic agents):
-  - Trips are generated from building capacity: homes go to jobs, schools, shops and parks.
-  - Trip timing follows a daily demand curve with morning and evening rush hours.
-  - Travel mode is chosen from a **regional profile**: US car-heavy, Vietnam motorbike-heavy with lane filtering, Netherlands bicycle-heavy, Japan and UK left-hand traffic, and more.
-  - Vehicles follow each other in lanes, queue, and stop at red lights (real OSM signals plus estimated ones). Congestion spills back across intersections.
-  - Buses run generated routes with stops, dwell times and passenger boarding. Pedestrians walk to the stops.
-  - Trains shuttle along real above-ground rail lines, including Chicago's elevated L.
-- **Urban impact dashboard**: housing and job capacity, floor area, road length and buildings, compared before and after your edits, plus live traffic metrics.
+- **Global search**: cities, streets, landmarks, or `lat, lon` coordinates (OpenStreetMap Nominatim).
+- **Real-world 3D city**, built from:
+  - **OpenStreetMap**: building footprints and heights, roads with lanes, traffic signals, rail and elevated rail, water, parks, multipolygon relations, and **sea derived from coastlines**.
+  - **Real terrain** from AWS Terrain Tiles, so hills look right in places like San Francisco and Hong Kong.
+- **City packs**: featured cities ship as pre-built data packs. They load instantly and work offline.
+- **Honest data labels**: each building's height is shown as *measured*, *from floor count*, *estimated* or *changed by you*. A layer highlights all estimated data.
+- **360° camera**: orbit, tilt, pan and zoom by mouse, touch or keyboard. Aerial, district and street-level presets. Double-click to orbit a building. Follow any vehicle or person.
+- **2D plan view**: a Canvas2D view with the same data, tools and simulation. It's used automatically on devices without WebGL.
+- **Planning tools**:
+  - Place buildings.
+  - Draw roads. They form real intersections and T-junctions with existing streets.
+  - Bulldoze buildings and roads, and change height and land use.
+  - **Draw bus lines and elevated metro lines.**
+  - Undo and redo.
+- **Scenarios**: real-world data stays untouched. Your proposal is a list of edits, toggled against the **Original** city. Projects autosave locally.
+- **Living city simulation** (synthetic agents, run in a Web Worker):
+  - **Trips**: generated from building capacity, so homes send people to jobs, schools, shops and parks. Timing follows a daily rush-hour demand curve.
+  - **Regional travel modes**: the US is car-heavy, Vietnam is motorbike-heavy with lane filtering, the Netherlands is bicycle-heavy, and Japan and the UK drive on the left.
+  - **Traffic**: vehicles follow each other in lanes, queue, stop at red lights and spill back. Traffic signals are visible, and pedestrians wait for the walk phase.
+  - **Transit riders**: riders choose a line that serves both ends of their trip. They walk to the stop, wait, board, ride, get off and walk on. Trains run on real above-ground rail.
+- **Urban impact dashboard**:
+  - Housing and job capacity, floor area, road length and buildings, compared before and after your edits.
+  - Live traffic metrics and per-line transit ridership.
+  - A **traffic flow layer** colours roads by speed.
 - **Day/night cycle**: windows light up at night.
-- **Adaptive graphics**: Low, Medium, High and Auto. Auto starts from device hints and drops resolution and shadows when the frame rate falls.
+- **Adaptive graphics**: Low, Medium, High and Auto.
 - Responsive layout for desktop, tablet and phone.
 
 ## Quick start
@@ -42,7 +52,8 @@ npm run dev        # http://localhost:5173
 | `npm run preview` | Serve the production build |
 | `npm run typecheck` | TypeScript only |
 | `npm test` | Unit tests (Vitest): geo parsing, routing, edits, simulation |
-| `npx playwright test` | End-to-end smoke test in a real browser (needs internet: loads live OSM data) |
+| `npx playwright test` | End-to-end tests in a real browser (featured cities use bundled packs; terrain and search need internet) |
+| `npx tsx scripts/build-city-packs.ts ["Name"]` | Rebuild static OSM data packs for featured cities into `public/packs/` |
 
 The first time, `npx playwright install chromium` may be needed for the e2e test.
 
@@ -61,23 +72,23 @@ docs/        ARCHITECTURE.md, ROADMAP.md, DECISIONS.md (ADR log)
 
 The simulation is fully separate from rendering, so it can move to a Web Worker or the server without changes. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**Stack:** TypeScript, React 18, Vite 5, three.js (WebGL2), Vitest, Playwright. There is no backend yet.
+**Stack:** TypeScript, React 18, Vite 5, three.js (WebGL2), Canvas2D, Web Workers, Vitest, Playwright. There is no backend; everything runs in the browser at zero hosting cost.
 
 ## Geographic data and attribution
 
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL), shown in the app.
-- During development, data comes from the **public Overpass API** (with mirror failover), and search from the **public Nominatim** API. These public services have usage limits and **must not carry production traffic**. A self-hosted pipeline is planned before launch; see [docs/DECISIONS.md](docs/DECISIONS.md).
-- Loaded areas are cached in the browser (Cache API), so revisiting a place is instant.
+- Terrain: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (open data, free).
+- **Featured cities** load from static packs in `public/packs/`, built by `scripts/build-city-packs.ts`. That makes them fast, reliable and free to serve.
+- **Any other place** is loaded live from the free **public Overpass API**, with several mirrors and timeouts, and searched through **public Nominatim**. These services can be slow or busy, and their limits make them unsuitable for heavy production traffic. The project budget is $0, so the plan is to grow the static pack pipeline. See [docs/DECISIONS.md](docs/DECISIONS.md).
+- Loaded areas and terrain are cached in the browser (Cache API).
 
 ## Known limitations
 
-- Terrain is flat for now. Elevation (DEM) is the next graphics priority.
-- Water bodies and parks mapped as OSM *relations* (multipolygons) are not loaded yet, which means some large rivers and lakes are missing.
 - Tunnels are hidden and excluded from the simulation. Bridges render at ground level.
-- New roads only connect at their snapped endpoints, not where they cross existing roads.
-- Bus routes are generated, not real GTFS routes. Mode shares are illustrative assumptions.
-- There are no accounts, sharing or collaboration yet. Projects are stored in this browser only.
-- The simulation runs on the main thread.
+- Very large water relations (over 500 members) are skipped. Lakes mapped as coastline (like the Great Lakes) work.
+- Generated bus routes are not real GTFS routes. Mode shares are illustrative assumptions.
+- No accounts, sharing or collaboration yet. Projects are stored in this browser only.
+- Live Overpass loading of non-featured places can take 30–60 s when public servers are busy.
 - **Simulation results are illustrative, not forecasts.** This is not a substitute for professional engineering or transport studies.
 
 ## Contributing

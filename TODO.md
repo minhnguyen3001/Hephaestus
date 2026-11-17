@@ -2,69 +2,62 @@
 
 Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Update this file whenever work lands.
 
+## Owner constraints (decided 2026-11-17)
+- **Zero cost.** Free data and services only. ADR-004 and ADR-005 are resolved toward free options (see docs/DECISIONS.md).
+- **GitHub on autopilot.** Commit, push and merge to `main` automatically.
+
 ## Awaiting owner decision
-- [ ] **ADR-004**: production geodata pipeline (recommended: self-hosted PMTiles from OSM + Overture on R2/CDN). Blocks launch and scale. See docs/DECISIONS.md.
-- [ ] **ADR-005**: backend stack and hosting budget (recommended: Node/Fastify + Postgres/PostGIS + Redis, ~$30–80/mo to start).
-- [ ] Product name: keep "Global City Simulator", or adopt the repo name (Hephaestus) or another brand.
-- [ ] Branching: work is on `feat/phase1-foundation`. Merge to `main` and keep feature branches, or commit straight to `main`?
+- [ ] Free public hosting. The repo is private, and GitHub Pages is paid for private repos. Options: make the repo public (free Pages via Actions), or connect a free Vercel, Netlify or Cloudflare Pages account.
+- [ ] Product name: keep "Global City Simulator", or adopt "Hephaestus" or another brand.
 
 ## P0
-- [ ] Terrain: load DEM (AWS Terrain Tiles / Terrarium, open data), build heightfield, put roads, buildings and agents on it
-- [ ] Load OSM multipolygon relations (water, parks, large buildings). Rivers like the Chicago River are currently missing
-- [ ] Move simulation to a Web Worker (transfer positions as Float32Array) to protect frame rate on low-end CPUs
-- [ ] Functional 2D planning mode (Canvas2D top-down, same data and tools) for devices without WebGL
-- [ ] Measure performance on throttled profiles (4× CPU slowdown, integrated GPU) and record targets in docs
+- [ ] Re-run the pack builder for Chicago, Saigon and any other city that failed (public Overpass timeouts): `npx tsx scripts/build-city-packs.ts "Chicago Loop"`
+- [ ] Measure performance on throttled profiles (4× CPU, integrated GPU) and record targets in docs/PERFORMANCE.md
 
 ## P1
-- [ ] Pedestrians obey signals and use crosswalks. Signals visualized (pole lights)
-- [ ] Road tool: split existing roads where a new road crosses them, so intersections form
+- [ ] Multiple named scenarios per project, with side-by-side metric comparison
+- [ ] Shareable link: place, camera and edits encoded in the URL (no backend needed)
+- [ ] Persist camera per project
 - [ ] Road properties editor (lanes, one-way, speed, pedestrian-only, bike lane)
-- [ ] Bus riders actually ride (agent boards, rides, alights, walks to destination)
-- [ ] User-drawn bus routes and metro lines with stations
-- [ ] Underground metro: render tunnel rail in an x-ray/underground view; trains on subway lines
-- [ ] Multiple scenarios per project and side-by-side comparison
-- [ ] Congestion heatmap layer on roads (edge speed / free-flow)
-- [ ] Persist the camera position per project. Shareable link with place and camera in the URL
-- [ ] Onboarding: interactive steps (detect orbit, select, edit) instead of a static card
-- [ ] Touch QA on real iPad and Android phone
-- [ ] CI: add e2e against a recorded Overpass fixture (avoid live-network flakiness)
+- [ ] Underground metro: x-ray view of tunnels; trains on subway lines; stations from OSM
+- [ ] Onboarding: interactive steps instead of a static card
+- [ ] Touch QA on a real iPad and Android phone; Safari QA
+- [ ] Transit: transfers between lines; real GTFS where free feeds exist; line headway editing
 
 ## P2
-- [ ] Building LOD: roof shapes (gabled/hipped for small residential), facade variety by region
+- [ ] Building LOD: roof shapes, facade variety by region
 - [ ] Trees along streets and in parks (instanced)
-- [ ] Bridges at proper elevation with ramps. Tunnels for roads
-- [ ] Zoning brush and polygon tools (draw building/park footprints)
-- [ ] Larger areas: tiled loading around camera, unload far tiles, multiple origins
-- [ ] Parking simulation, taxis picking up and dropping off
-- [ ] Weekend/holiday demand profiles, events (road closure, concert)
-- [ ] Accessibility metrics (walk-time isochrones to jobs/parks/transit)
-- [ ] Bundle: lazy-load OrbitControls/BufferGeometryUtils with engine (already split), check landing bundle stays < 60 KB gz
+- [ ] Bridges at proper elevation with ramps; road tunnels
+- [ ] Zoning brush and polygon tools (draw building and park footprints)
+- [ ] Larger areas: tiled loading around the camera, multiple origins
+- [ ] Parking, taxis picking up and dropping off
+- [ ] Weekend and holiday demand profiles; events (road closure, concert)
+- [ ] Accessibility metrics (walk-time isochrones to jobs, parks and transit)
+- [ ] Grow the pack pipeline: GitHub Action (free minutes) to rebuild packs on a schedule
 
 ## P3
-- [ ] Accounts, cloud save, sharing, permissions (after ADR-005)
-- [ ] Real-time collaboration (op log over WebSocket rooms)
-- [ ] Load testing to 1,000+ concurrent users (k6)
-- [ ] GTFS import for real transit routes
+- [ ] Accounts, cloud save, sharing, permissions (needs free-tier backend, e.g. Supabase free, if approved)
+- [ ] Real-time collaboration
+- [ ] Load testing (only meaningful once there is a backend)
 - [ ] Planning timeline (5/10/20 years) and challenges
 - [ ] Optional AI planning assistant (pluggable, not required)
 - [ ] WebGPU renderer path
 
 ## Known bugs / tech debt
-- [ ] Vehicles at junctions can overlap with crossing turns from the same signal group (no conflict resolution inside intersections)
-- [ ] Lane assignment is static per agent (no lane changes), so lane switches snap visually at edge transitions
-- [ ] Proposed roads don't receive lane markings until connected properly; endpoints only snap within 25 m
-- [ ] `setWorld` rebuilds all static meshes on every edit (fine at ~3k buildings, will need per-chunk rebuild for bigger areas)
-- [ ] Public Overpass/Nominatim usage (dev only, see ADR-004)
+- [ ] No conflict resolution inside intersections between turning vehicles in the same signal group
+- [ ] No lane changes; lane switches snap visually at edge transitions
+- [ ] `setWorld` rebuilds all static meshes on every edit (fine at ~4k buildings)
+- [ ] Metro trains don't follow each other (they may overlap at stations on short lines)
+- [ ] Riders choose transit only on a single line (no transfers yet)
 
 ## Done
-- [x] Repo scaffold: Vite + React + TS + three.js, Vitest, Playwright (2026-11-17)
-- [x] OSM loading via Overpass with Cache API and mirror failover; parsing of buildings, roads, water, parks, rail, signals
-- [x] Height/use provenance labels; "highlight estimated data" layer
-- [x] 3D engine: merged pickable buildings with window/night shader, mitered road ribbons with markings, elevated rail with pillars
-- [x] Camera: 360° orbit, presets, fly-to, keyboard, follow agent, double-click orbit-focus, ground clamp
-- [x] Tools: select/inspect, place building, draw road (snapping), bulldoze, height/use edits, undo/redo
-- [x] Original vs Proposed toggle, local autosave, project list
-- [x] Simulation: OD trips from building capacity, regional mode share, lane following, signals, spill-back, buses with stops and boarding, trains
-- [x] Dashboard: capacity before/after, live traffic metrics, assumptions shown
-- [x] Adaptive quality (Low/Medium/High/Auto) with FPS-driven resolution scaling
-- [x] Unit tests (11) and e2e smoke test against live Chicago data (passing)
+- [x] Phase 1 foundation: search, OSM 3D city, camera, tools, undo/redo, scenarios, simulation, dashboard (2026-11-17)
+- [x] Real terrain from AWS Terrain Tiles; draped roads and areas; buildings seated on terrain
+- [x] Multipolygon relations; sea from coastlines with islands; area clipping
+- [x] Static city packs + pack builder; live Overpass split into core and streamed extras with mirror timeouts
+- [x] Simulation in a Web Worker (inline fallback); wall-clock time; bounded warm-up; main-component snapping
+- [x] 2D plan view (Canvas2D) with full tools, auto-used without WebGL
+- [x] Traffic flow layer; visible signal heads; pedestrians obey signals
+- [x] Drawn roads form intersections and T-junctions
+- [x] User-drawn bus and elevated metro lines with full rider lifecycle and per-line ridership
+- [x] 21 unit tests; 6 e2e scenarios
