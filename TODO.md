@@ -22,7 +22,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [ ] Facade variety by region; more roof shapes (hipped, flat with parapets)
 - [ ] Road tunnels (currently hidden)
 - [ ] Larger areas: tiled loading around the camera (now: "load the city here" opens a new area)
-- [ ] Geometry build in a worker (ready time is 8–12 s under 4× CPU throttle)
+- [ ] ~~Geometry build in a worker~~ not needed: profiling (`scripts/profile-load.ts`) shows the full data pipeline is ~160 ms; terrain no longer blocks first render
 - [ ] Parking, taxis picking up and dropping off
 - [ ] Special events (concert/stadium surges); public holiday profile
 - [ ] Network-based walk isochrones (current access metrics use straight-line distance)

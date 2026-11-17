@@ -17,9 +17,9 @@ Headless Chromium, **software rendering (SwiftShader, no GPU)**, **4× CPU throt
 
 | View | Ready | Main-thread ms/frame | fps (headless) | Agents |
 | --- | --- | --- | --- | --- |
-| 2D plan | 6.5 s | **0.7 ms** | 18 | 146 |
-| 3D Low | 9.7 s | **1.8 ms** | 11 | 146 |
-| 3D High | 14.1 s | **4.1 ms** | 12 | ~800 |
+| 2D plan | 3.3 s | **0.7 ms** | 18 | 146 |
+| 3D Low | 7.1–8.6 s | **1.8 ms** | 11 | 146 |
+| 3D High | 10.4 s | **4.1 ms** | 12 | ~800 |
 
 Accessibility metrics and the advisor use grid-based proximity lookups. Earlier O(homes × stops) scans caused 100+ ms spikes in dense cities.
 
@@ -39,8 +39,10 @@ Bundle: landing ~49 KB gz. The 3D engine (three.js ~125 KB gz) and workspace (~3
 - Window shader fades the facade grid with `fwidth`, so distant buildings don't shimmer.
 - Featured cities ship as static packs; terrain and OSM responses are cached.
 
+Load profile (`npx tsx scripts/profile-load.ts`, Manhattan, unthrottled): JSON 13 ms, parse 24 ms, metrics 16 ms, buildings 71 ms, roads 31 ms, trees 5 ms. The data pipeline is not the bottleneck. Terrain tiles now drape in after first render, and the 3D chunk is prefetched from the landing page.
+
 ## Gaps
 - Real-device measurements (old Windows laptop, iPad, Android phone) are not done yet.
-- Time to ready is dominated by geometry build. Building geometry in a worker is a P2 optimisation.
+- 3D time to ready under throttle is dominated by parsing three.js and creating the WebGL context and shaders.
 
 Re-run with: `npx playwright test e2e/perf.spec.ts` (writes `test-results/perf.json`).

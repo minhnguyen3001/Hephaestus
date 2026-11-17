@@ -203,11 +203,13 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     const ctrl = new AbortController();
     setError(null);
     const center = { lat: project.place.lat, lon: project.place.lon };
-    const terrain = fetchTerrain(center, project.radius, ctrl.signal);
-    Promise.all([fetchWorld(center, project.radius, ctrl.signal), terrain])
-      .then(([w, t]) => {
+    // Terrain never blocks the city: it drapes in when the tiles arrive.
+    const terrain = fetchTerrain(center, project.radius, ctrl.signal).catch(() => undefined);
+    fetchWorld(center, project.radius, ctrl.signal)
+      .then((w) => {
         if (!w.buildings.length && !w.roads.length) setError('No mapped streets or buildings were found here. Try a more central location.');
-        setBase({ ...w, terrain: t });
+        setBase(w);
+        terrain.then((t) => t && setBase((b) => (b ? { ...b, terrain: t } : b)));
         // Water and parks stream in afterwards; the city is usable without them.
         fetchAreas(center, project.radius, ctrl.signal)
           .then((extra) => setBase((b) => (b ? { ...b, ...extra } : b)))

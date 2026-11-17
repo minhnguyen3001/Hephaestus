@@ -5,8 +5,14 @@ import { newProject, saveProject, type Project } from './project/store';
 import { PRESETS, resolveQuality } from './render/quality';
 import { Landing } from './ui/Landing';
 
-// The 3D workspace (three.js + simulation) is code-split so the landing page loads fast on slow networks.
-const WorldView = lazy(() => import('./ui/WorldView'));
+// The 3D workspace (three.js + simulation) is code-split so the landing page loads fast on slow networks,
+// then prefetched while the user is reading the landing page.
+const loadWorldView = () => import('./ui/WorldView');
+const WorldView = lazy(loadWorldView);
+if (typeof window !== 'undefined') {
+  const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 1500));
+  idle(() => void loadWorldView().catch(() => undefined));
+}
 
 export function App() {
   const [project, setProject] = useState<Project | null>(null);
