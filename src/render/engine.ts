@@ -101,6 +101,39 @@ const PALETTES: Record<string, number[]> = {
   emergency: [0xf4f4f4, 0xf4f4f4, 0xd8342c],
 };
 const MAX_INSTANCES = 1100;
+
+/** A pinned note: a stalk from the ground and a label that stays readable at any distance. */
+function noteMarker(text: string, at: THREE.Vector3): THREE.Group {
+  const g = new THREE.Group();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+  const font = '600 28px Inter, system-ui, sans-serif';
+  ctx.font = font;
+  const label = text.length > 48 ? `${text.slice(0, 47)}…` : text;
+  const w = Math.min(900, ctx.measureText(label).width + 40);
+  canvas.width = w;
+  canvas.height = 56;
+  ctx.font = font;
+  ctx.fillStyle = 'rgba(17,23,31,0.9)';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, w, 56, 14);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(0, 0, 8, 56);
+  ctx.fillStyle = '#eef2f6';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 22, 29);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, sizeAttenuation: false }));
+  sprite.scale.set((0.045 * w) / 56, 0.045, 1);
+  sprite.center.set(0, 0);
+  sprite.position.set(at.x, at.y + 22, at.z);
+  sprite.renderOrder = 20;
+  const stalk = new THREE.Line(new THREE.BufferGeometry().setFromPoints([at, at.clone().setY(at.y + 22)]), new THREE.LineBasicMaterial({ color: 0xffd166 }));
+  g.add(stalk, sprite);
+  return g;
+}
 const UNDER = 14; // tunnel depth below ground, meters
 const SKY_DAY = new THREE.Color(0xa8cbe8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
@@ -440,7 +473,13 @@ export class Engine implements WorldRenderer {
   }
 
   private clearGroup(g: THREE.Group) {
-    g.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    g.traverse((o) => {
+      (o as THREE.Mesh).geometry?.dispose();
+      if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
+    });
     g.clear();
   }
 
@@ -560,6 +599,8 @@ export class Engine implements WorldRenderer {
       this.treeMesh = tm;
       this.worldGroup.add(tm);
     } else this.treeMesh = undefined;
+
+    for (const n of w.notes ?? []) this.worldGroup.add(noteMarker(n.text, v3(n.p, this.hp(n.p))));
 
     const style: BuildingStyle = { highlightEstimated: this.layers.estimated };
     this.buildings = new PickMesh(

@@ -83,6 +83,13 @@ export interface Rail {
   tunnel: boolean;
 }
 
+/** A pinned comment on the plan. */
+export interface Note {
+  id: string;
+  p: Vec2;
+  text: string;
+}
+
 /** A user-designed transit line. Bus lines run on streets; metro lines are new elevated guideways. */
 export interface TransitLineSpec {
   id: string;
@@ -105,6 +112,7 @@ export interface WorldData {
   fetchedAt: string;
   source: string;
   terrain?: Terrain; // undefined = flat (no DEM or loading failed)
+  notes?: Note[]; // planner annotations
   transitLines?: TransitLineSpec[]; // proposed lines (real-world transit comes from rails / generated routes)
 }
 

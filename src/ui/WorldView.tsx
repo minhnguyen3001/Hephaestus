@@ -26,6 +26,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'bulldoze', label: 'Bulldoze', key: '4', icon: '✕' },
   { id: 'transit', label: 'Transit line', key: '5', icon: '⇆' },
   { id: 'zone', label: 'Zone area', key: '6', icon: '▣' },
+  { id: 'note', label: 'Add note', key: '7', icon: '✎' },
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
@@ -486,6 +487,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           suggestedChallenge={suggested(project.place.name, project.place.countryCode)?.id}
           onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
           insights={insights}
+          notes={proposed?.notes ?? []}
+          onRemoveNote={editable ? (id) => edit({ kind: 'removeNote', id }) : undefined}
           onLook={(p) => engine.current?.lookAt(p)}
           onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}

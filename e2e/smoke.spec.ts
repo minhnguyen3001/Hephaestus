@@ -271,3 +271,23 @@ test('real subway lines with stations carry riders', async ({ page }) => {
   await page.locator('.lines').scrollIntoViewIfNeeded();
   await page.screenshot({ path: 'test-results/20-subway-lines.png' });
 });
+
+test('pin a note and see it travel in a share link', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  page.on('dialog', (d) => d.accept('Protected bike lane here'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Add note' }).click();
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.55);
+  await expect(page.locator('.notes')).toContainText('Protected bike lane here');
+  await page.screenshot({ path: 'test-results/21-note.png' });
+  await page.getByRole('button', { name: 'Share' }).click();
+  await expect(page.locator('.hint')).toContainText('Share link copied');
+  const url = await page.evaluate(() => navigator.clipboard.readText());
+  const other = await context.newPage();
+  await other.goto(url);
+  await expect(other.locator('.notes')).toContainText('Protected bike lane here', { timeout: 30_000 });
+});

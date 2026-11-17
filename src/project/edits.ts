@@ -1,4 +1,4 @@
-import type { Building, BuildingUse, Road, TransitLineSpec, Vec2, WorldData } from '../geo/types';
+import type { Building, BuildingUse, Note, Road, TransitLineSpec, Vec2, WorldData } from '../geo/types';
 import { buildingsInside, developZone, type Zone } from './zoning';
 
 /**
@@ -15,6 +15,8 @@ export type Edit =
   | { kind: 'addLine'; line: TransitLineSpec }
   | { kind: 'zone'; zone: Zone }
   | { kind: 'setRoad'; id: string; patch: RoadPatch }
+  | { kind: 'addNote'; note: Note }
+  | { kind: 'removeNote'; id: string }
   | { kind: 'removeLine'; id: string };
 
 export type RoadPatch = Partial<Pick<Road, 'lanes' | 'oneway' | 'maxspeedKmh' | 'kind'>>;
@@ -25,6 +27,7 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
   const roads = new Map(base.roads.map((r) => [r.id, r]));
   const lines = new Map((base.transitLines ?? []).map((l) => [l.id, l]));
   const areas = [...base.areas];
+  const notes = new Map((base.notes ?? []).map((n) => [n.id, n]));
   for (const e of edits) {
     switch (e.kind) {
       case 'setHeight': {
@@ -52,6 +55,12 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
       case 'addLine':
         lines.set(e.line.id, e.line);
         break;
+      case 'addNote':
+        notes.set(e.note.id, e.note);
+        break;
+      case 'removeNote':
+        notes.delete(e.id);
+        break;
       case 'setRoad': {
         const r = roads.get(e.id);
         if (r) roads.set(e.id, { ...r, ...e.patch });
@@ -70,7 +79,7 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
         break;
     }
   }
-  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()], areas };
+  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()], areas, notes: [...notes.values()] };
 }
 
 export interface History {
@@ -97,6 +106,8 @@ export function describeEdit(e: Edit): string {
     case 'addLine': return `New ${e.line.mode} line`;
     case 'zone': return `Zone: ${e.zone.use}`;
     case 'setRoad': return 'Edit road';
+    case 'addNote': return 'Note';
+    case 'removeNote': return 'Remove note';
     case 'removeLine': return 'Remove transit line';
   }
 }

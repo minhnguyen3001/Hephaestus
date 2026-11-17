@@ -427,6 +427,24 @@ export class Plan2D implements WorldRenderer {
       ctx.fillStyle = `rgba(11,19,34,${0.45 * Math.min(1, night)})`;
       ctx.fillRect(0, 0, W, H);
     }
+    // notes in screen space so text stays readable
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '600 12px Inter, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    for (const n of this.world?.notes ?? []) {
+      const x = (n.p[0] - this.cx) * this.scale + W / dpr / 2;
+      const y = -(n.p[1] - this.cy) * this.scale + H / dpr / 2;
+      const label = n.text.length > 40 ? `${n.text.slice(0, 39)}…` : n.text;
+      const tw = ctx.measureText(label).width + 16;
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(17,23,31,0.9)';
+      ctx.fillRect(x + 6, y - 22, tw, 20);
+      ctx.fillStyle = '#eef2f6';
+      ctx.fillText(label, x + 14, y - 12);
+    }
   }
 
   private drawStatic(ctx: CanvasRenderingContext2D, W: number, H: number, s: number, px: number) {

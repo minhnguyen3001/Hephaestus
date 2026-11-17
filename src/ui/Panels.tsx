@@ -5,7 +5,7 @@ import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
 import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats } from '../sim/simulation';
-import type { Vec2 } from '../geo/types';
+import type { Note, Vec2 } from '../geo/types';
 import type { Insight } from './advisor';
 import { CHALLENGES, evaluate } from './challenges';
 import type { CityMetrics } from './metrics';
@@ -198,7 +198,7 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -242,6 +242,20 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
                 <strong>{i.title}</strong>
                 <span>{i.detail}</span>
                 {i.at && onLook && <button className="link" onClick={() => onLook(i.at!)}>Show me →</button>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {notes && notes.length > 0 && (
+        <div className="notes">
+          <h4>Notes ({notes.length})</h4>
+          <ul>
+            {notes.map((n) => (
+              <li key={n.id}>
+                <span>{n.text}</span>
+                {onLook && <button className="link" onClick={() => onLook(n.p)}>Show</button>}
+                {onRemoveNote && <button className="icon-btn" aria-label="Remove note" onClick={() => onRemoveNote(n.id)}>✕</button>}
               </li>
             ))}
           </ul>
