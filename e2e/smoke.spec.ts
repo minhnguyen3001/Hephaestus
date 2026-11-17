@@ -192,3 +192,23 @@ test('scenarios, comparison and share link round-trip', async ({ page, context }
   await expect(other.getByRole('button', { name: /Proposed · 1/ })).toBeVisible({ timeout: 30_000 });
   await expect(other.locator('.project input')).toHaveValue(/Shibuya — Proposal A/);
 });
+
+test('zone an area and see buildings and capacity appear', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Nob Hill/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.getByRole('button', { name: 'Zone area' }).click();
+  await page.getByLabel('Zone use').selectOption('mixed');
+  await page.getByRole('button', { name: 'High' }).click();
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  for (const [x, y] of [[110, 300], [300, 300], [300, 480], [110, 480]]) await page.mouse.click(box.x + x, box.y + y);
+  await page.getByRole('button', { name: 'Finish zone' }).click();
+  await expect(page.locator('.dashboard .metric').filter({ hasText: 'Housing capacity' })).toContainText('+');
+  await page.screenshot({ path: 'test-results/15-zone-2d.png' });
+  await page.getByRole('button', { name: '3D view' }).click();
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/16-zone-3d.png' });
+});

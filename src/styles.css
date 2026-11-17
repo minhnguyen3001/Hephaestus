@@ -229,3 +229,6 @@ select.scenario { max-width: 150px; }
 .compare .on { color: var(--accent); }
 @media (max-width: 600px) { select.scenario, .share-btn { display: none; } }
 .notice { background: rgba(255, 154, 60, 0.15); color: #ffc58f; border-radius: 10px; padding: 8px 12px; max-width: 640px; }
+.linebar .check { display: flex; gap: 6px; align-items: center; font-size: 12.5px; white-space: nowrap; }
+.linebar .check input { accent-color: var(--accent); }
+@media (max-width: 900px) { .linebar { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 28px); } }

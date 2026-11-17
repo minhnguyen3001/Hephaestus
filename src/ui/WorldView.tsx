@@ -6,6 +6,7 @@ import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../pr
 import { encodePlan } from '../project/share';
 import { saveProject, withScenarios, type Project, type Scenario } from '../project/store';
 import { Engine, type CameraMode, type Layers, type Perf, type Selection, type Tool, type WorldRenderer } from '../render/engine';
+import type { ZoneOptions } from '../render/tools';
 import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
 import { profileFor } from '../sim/region';
@@ -20,6 +21,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'road', label: 'Draw road', key: '3', icon: '⟋' },
   { id: 'bulldoze', label: 'Bulldoze', key: '4', icon: '✕' },
   { id: 'transit', label: 'Transit line', key: '5', icon: '⇆' },
+  { id: 'zone', label: 'Zone area', key: '6', icon: '▣' },
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
@@ -64,6 +66,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [running, setRunning] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [lineMode, setLineMode] = useState<'bus' | 'metro'>('bus');
+  const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [onboard, setOnboard] = useState(() => {
@@ -174,6 +177,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }, [tool, view, quality, mode]);
   useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
   useEffect(() => engine.current?.setLineMode(lineMode), [lineMode, quality, mode]);
+  useEffect(() => engine.current?.setZoneOptions(zoneOpts), [zoneOpts, quality, mode]);
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
@@ -426,7 +430,32 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
             <button className={lineMode === 'bus' ? 'on' : ''} onClick={() => setLineMode('bus')}>Bus</button>
             <button className={lineMode === 'metro' ? 'on' : ''} onClick={() => setLineMode('metro')}>Elevated metro</button>
           </div>
-          <button className="primary" onClick={() => engine.current?.finishLine()}>Finish line</button>
+          <button className="primary" onClick={() => engine.current?.finishDraft()}>Finish line</button>
+          <button className="ghost" onClick={() => setTool('select')}>Done</button>
+        </div>
+      )}
+
+      {tool === 'zone' && editable && (
+        <div className="panel linebar" role="group" aria-label="New zone">
+          <select value={zoneOpts.use} onChange={(e) => setZoneOpts({ ...zoneOpts, use: e.target.value as ZoneOptions['use'] })} aria-label="Zone use">
+            <option value="residential">Residential</option>
+            <option value="commercial">Commercial</option>
+            <option value="office">Office</option>
+            <option value="mixed">Mixed-use</option>
+            <option value="industrial">Industrial</option>
+            <option value="park">Park</option>
+          </select>
+          {zoneOpts.use !== 'park' && (
+            <div className="seg" role="group" aria-label="Density">
+              {(['low', 'medium', 'high'] as const).map((d) => (
+                <button key={d} className={zoneOpts.density === d ? 'on' : ''} onClick={() => setZoneOpts({ ...zoneOpts, density: d })}>{d[0].toUpperCase() + d.slice(1)}</button>
+              ))}
+            </div>
+          )}
+          {zoneOpts.use !== 'park' && (
+            <label className="check"><input type="checkbox" checked={zoneOpts.replace} onChange={(e) => setZoneOpts({ ...zoneOpts, replace: e.target.checked })} /> Replace existing</label>
+          )}
+          <button className="primary" onClick={() => engine.current?.finishDraft()}>Finish zone</button>
           <button className="ghost" onClick={() => setTool('select')}>Done</button>
         </div>
       )}

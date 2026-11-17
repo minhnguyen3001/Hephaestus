@@ -1,4 +1,5 @@
 import type { Building, BuildingUse, Road, TransitLineSpec, Vec2, WorldData } from '../geo/types';
+import { buildingsInside, developZone, type Zone } from './zoning';
 
 /**
  * A scenario is the immutable real-world base plus an ordered list of edits.
@@ -12,6 +13,7 @@ export type Edit =
   | { kind: 'addRoad'; road: Road }
   | { kind: 'removeRoad'; id: string }
   | { kind: 'addLine'; line: TransitLineSpec }
+  | { kind: 'zone'; zone: Zone }
   | { kind: 'removeLine'; id: string };
 
 export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
@@ -19,6 +21,7 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
   const buildings = new Map(base.buildings.map((b) => [b.id, b]));
   const roads = new Map(base.roads.map((r) => [r.id, r]));
   const lines = new Map((base.transitLines ?? []).map((l) => [l.id, l]));
+  const areas = [...base.areas];
   for (const e of edits) {
     switch (e.kind) {
       case 'setHeight': {
@@ -46,12 +49,20 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
       case 'addLine':
         lines.set(e.line.id, e.line);
         break;
+      case 'zone': {
+        const z = e.zone;
+        if (z.replace) for (const id of buildingsInside(z.polygon, [...buildings.values()])) buildings.delete(id);
+        const dev = developZone(z, [...roads.values()], [...buildings.values()]);
+        for (const b of dev.buildings) buildings.set(b.id, b);
+        if (dev.park) areas.push(dev.park);
+        break;
+      }
       case 'removeLine':
         lines.delete(e.id);
         break;
     }
   }
-  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()] };
+  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()], areas };
 }
 
 export interface History {
@@ -76,6 +87,7 @@ export function describeEdit(e: Edit): string {
     case 'addRoad': return 'New road';
     case 'removeRoad': return 'Remove road';
     case 'addLine': return `New ${e.line.mode} line`;
+    case 'zone': return `Zone: ${e.zone.use}`;
     case 'removeLine': return 'Remove transit line';
   }
 }

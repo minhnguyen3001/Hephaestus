@@ -1,8 +1,9 @@
 import type { Vec2, WorldData } from '../geo/types';
 import { dist } from '../geo/util';
 import type { Edit } from '../project/edits';
+import type { Density, ZoneUse } from '../project/zoning';
 
-export type Tool = 'select' | 'build' | 'road' | 'bulldoze' | 'transit';
+export type Tool = 'select' | 'build' | 'road' | 'bulldoze' | 'transit' | 'zone';
 
 export interface Hit {
   kind: 'agent' | 'building' | 'road' | 'ground';
@@ -16,10 +17,17 @@ export const TOOL_HINTS: Record<Tool, string | null> = {
   road: 'Click a start point, then an end point. Ends snap to nearby intersections.',
   bulldoze: 'Click a building or road to remove it from the proposal.',
   transit: 'Click to place stops in order, then press Finish (or Enter). Bus stops snap to streets.',
+  zone: 'Click the corners of an area, then Finish (or Enter). It fills with buildings of the chosen use.',
 };
 
+export interface ZoneOptions {
+  use: ZoneUse;
+  density: Density;
+  replace: boolean;
+}
+
 /** What a click should be able to hit for each tool (only Select can pick people and vehicles). */
-export const pickMode = (t: Tool): 'all' | 'static' | 'ground' => (t === 'road' || t === 'transit' ? 'ground' : t === 'select' ? 'all' : 'static');
+export const pickMode = (t: Tool): 'all' | 'static' | 'ground' => (t === 'road' || t === 'transit' || t === 'zone' ? 'ground' : t === 'select' ? 'all' : 'static');
 
 export function snapNode(world: WorldData | undefined, p: Vec2, radius = 25): { p: Vec2; node?: string } {
   let best: { p: Vec2; node?: string } = { p };
@@ -55,6 +63,7 @@ export class ToolController {
   tool: Tool = 'select';
   roadStart?: { p: Vec2; node?: string };
   lineMode: 'bus' | 'metro' = 'bus';
+  zone: ZoneOptions = { use: 'mixed', density: 'medium', replace: false };
   draft: Vec2[] = [];
 
   constructor(private host: ToolHost) {}
@@ -74,7 +83,22 @@ export class ToolController {
     }
   }
 
-  finishLine(world: WorldData | undefined) {
+  /** Complete the current multi-click drawing (transit line or zone). */
+  finish(world: WorldData | undefined) {
+    if (this.tool === 'zone') return this.finishZone();
+    if (this.tool === 'transit') return this.finishLine(world);
+  }
+
+  private finishZone() {
+    if (this.draft.length < 3) return this.host.onHint('A zone needs at least three corners.');
+    const z = this.zone;
+    this.host.onEdit({ kind: 'zone', zone: { id: `u-z-${Date.now().toString(36)}`, polygon: this.draft, use: z.use, density: z.density, replace: z.use === 'park' || z.replace } });
+    this.draft = [];
+    this.host.drawDraft();
+    this.host.onHint(z.use === 'park' ? 'Park created. Check green space in the dashboard.' : `Zoned for ${z.use} at ${z.density} density — see housing and jobs change.`);
+  }
+
+  private finishLine(world: WorldData | undefined) {
     if (this.draft.length < 2) return this.host.onHint('A line needs at least two stops.');
     const n = world?.transitLines?.length ?? 0;
     const label = this.lineMode === 'bus' ? 'Bus' : 'Metro';
@@ -112,6 +136,10 @@ export class ToolController {
           heightSource: 'user', use: 'residential', useSource: 'user', origin: 'proposed', name: 'Proposed building',
         },
       });
+    } else if (this.tool === 'zone') {
+      this.draft = [...this.draft, hit.p];
+      h.drawDraft();
+      h.onHint(`${this.draft.length} corner${this.draft.length === 1 ? '' : 's'} — keep clicking, then Finish (Enter).`);
     } else if (this.tool === 'transit') {
       let p = hit.p;
       if (this.lineMode === 'bus') {

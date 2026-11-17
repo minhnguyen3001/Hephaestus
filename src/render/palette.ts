@@ -23,4 +23,7 @@ export const AREA_COLORS = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
 export const AGENT_COLORS: Record<string, number> = {
   pedestrian: 0x2c3e50, bicycle: 0x16a085, motorcycle: 0xc0392b, car: 0x3d4a5c, taxi: 0xf2c230, truck: 0x8c6e4a, bus: 0x2f6fd6,
 };
+export const ZONE_COLORS: Record<string, number> = {
+  residential: 0xe8b04b, commercial: 0x4a90d9, office: 0x7b6fd6, mixed: 0xd9668f, industrial: 0x9b8b6e, park: 0x5fa35a,
+};
 export const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;

@@ -16,7 +16,8 @@ import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type SimStats
 export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
 import { PRESETS, resolveQuality, type Quality, type QualitySetting } from './quality';
-import { pickMode, ToolController, type Tool } from './tools';
+import { pickMode, ToolController, type Tool, type ZoneOptions } from './tools';
+import { ZONE_COLORS } from './palette';
 import { ROAD_COLORS } from './palette';
 
 export type { Tool };
@@ -50,7 +51,8 @@ export interface WorldRenderer {
   setCameraMode(mode: CameraMode): void;
   focusSelected(): void;
   orbitStep(radians: number): void;
-  finishLine(): void;
+  finishDraft(): void;
+  setZoneOptions(o: ZoneOptions): void;
   setLineMode(m: 'bus' | 'metro'): void;
   getView(): SavedView;
   setView(v: SavedView): void;
@@ -609,9 +611,15 @@ export class Engine implements WorldRenderer {
     this.clearGroup(this.draftGroup);
     const d = this.tools.draft;
     if (!d.length) return;
-    const y = (p: Vec2) => this.hp(p) + (this.tools.lineMode === 'metro' ? 8.2 : 1);
-    const color = this.tools.lineMode === 'metro' ? 0x8e44ad : 0x3fd3c3;
-    if (d.length > 1) this.draftGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(d.map((p) => v3(p, y(p)))), new THREE.LineBasicMaterial({ color, depthTest: false })));
+    const zone = this.tools.tool === 'zone';
+    const y = (p: Vec2) => this.hp(p) + (!zone && this.tools.lineMode === 'metro' ? 8.2 : 1.2);
+    const color = zone ? ZONE_COLORS[this.tools.zone.use] : this.tools.lineMode === 'metro' ? 0x8e44ad : 0x3fd3c3;
+    const ring = zone && d.length > 2 ? [...d, d[0]] : d;
+    if (ring.length > 1) this.draftGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ring.map((p) => v3(p, y(p)))), new THREE.LineBasicMaterial({ color, depthTest: false })));
+    if (zone && d.length > 2) {
+      const g = polygonGeometry(d, (p) => this.hp(p) + 0.6, new THREE.Color(color));
+      if (g) this.draftGroup.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide })));
+    }
     for (const p of d) {
       const m = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
       m.position.copy(v3(p, y(p)));
@@ -619,8 +627,13 @@ export class Engine implements WorldRenderer {
     }
   }
 
-  finishLine() {
-    this.tools.finishLine(this.world);
+  finishDraft() {
+    this.tools.finish(this.world);
+  }
+
+  setZoneOptions(o: ZoneOptions) {
+    this.tools.zone = o;
+    this.drawDraft();
   }
 
   getView(): SavedView {
@@ -1004,7 +1017,7 @@ export class Engine implements WorldRenderer {
       return;
     }
     if (k === 'f' && e.shiftKey) return this.focusSelected();
-    if (k === 'enter' && this.tools.tool === 'transit') return this.finishLine();
+    if (k === 'enter' && (this.tools.tool === 'transit' || this.tools.tool === 'zone')) return this.finishDraft();
     if (['w', 'a', 's', 'd', 'q', 'e', 'r', 'f', '=', '+', '-', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
       this.keys.add(k);
       this.tween = undefined;

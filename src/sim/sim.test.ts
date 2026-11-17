@@ -220,6 +220,29 @@ describe('simulation', () => {
   });
 });
 
+describe('zoning', () => {
+  it('fills a zone with buildings clear of streets, and makes parks', () => {
+    const base = gridFixture();
+    // One whole block interior between streets x∈[-200,-100], y∈[-200,-100] (with the fixture building inside).
+    const block: [number, number][] = [[-195, -195], [-105, -195], [-105, -105], [-195, -105]];
+    const w = applyEdits(base, [{ kind: 'zone', zone: { id: 'z1', polygon: block, use: 'residential', density: 'low', replace: true } }]);
+    const zoned = w.buildings.filter((b) => b.id.startsWith('z1-'));
+    expect(zoned.length).toBeGreaterThan(0);
+    for (const b of zoned) {
+      expect(b.origin).toBe('proposed');
+      expect(b.use).toBe('residential');
+      for (const [x, y] of b.footprint) expect(x > -200 && x < -100 && y > -200 && y < -100).toBe(true);
+    }
+    // the original building in that block was replaced
+    expect(w.buildings.length).toBe(base.buildings.length - 1 + zoned.length);
+    const parked = applyEdits(base, [{ kind: 'zone', zone: { id: 'z2', polygon: block, use: 'park', density: 'low', replace: true } }]);
+    expect(parked.areas.some((a) => a.id === 'zone-z2' && a.kind === 'park')).toBe(true);
+    expect(parked.buildings.length).toBe(base.buildings.length - 1);
+    // deterministic
+    expect(applyEdits(base, [{ kind: 'zone', zone: { id: 'z1', polygon: block, use: 'residential', density: 'low', replace: true } }]).buildings).toEqual(w.buildings);
+  });
+});
+
 describe('trees', () => {
   it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
     const { treePoints } = await import('../geo/trees');

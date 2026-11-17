@@ -7,9 +7,9 @@ import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { signalPhase } from '../sim/simulation';
 import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
-import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS } from './palette';
+import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
 import { PRESETS } from './quality';
-import { pickMode, ToolController, type Hit, type Tool } from './tools';
+import { pickMode, ToolController, type Hit, type Tool, type ZoneOptions } from './tools';
 
 const AGENT_SIZE: Record<string, [number, number]> = {
   pedestrian: [0.7, 0.7], bicycle: [0.6, 1.8], motorcycle: [0.8, 2.1], car: [1.9, 4.6], taxi: [1.9, 4.8], truck: [2.5, 9], bus: [2.6, 12],
@@ -163,8 +163,12 @@ export class Plan2D implements WorldRenderer {
     /* north-up plan view */
   }
 
-  finishLine() {
-    this.tools.finishLine(this.world);
+  finishDraft() {
+    this.tools.finish(this.world);
+  }
+
+  setZoneOptions(o: ZoneOptions) {
+    this.tools.zone = o;
   }
 
   getView(): SavedView {
@@ -410,10 +414,16 @@ export class Plan2D implements WorldRenderer {
       if (this.layers.agents && this.sim) this.drawAgents(px);
       const d = this.tools.draft;
       if (d.length) {
-        ctx.strokeStyle = this.tools.lineMode === 'metro' ? '#8e44ad' : hex(PROPOSED_COLOR);
+        const zone = this.tools.tool === 'zone';
+        ctx.strokeStyle = zone ? hex(ZONE_COLORS[this.tools.zone.use]) : this.tools.lineMode === 'metro' ? '#8e44ad' : hex(PROPOSED_COLOR);
         ctx.fillStyle = ctx.strokeStyle;
         ctx.lineWidth = Math.max(3, 2 * px);
-        ctx.stroke(this.linePath(d));
+        if (zone && d.length > 2) {
+          ctx.globalAlpha = 0.25;
+          ctx.fill(this.polyPath(d));
+          ctx.globalAlpha = 1;
+          ctx.stroke(this.polyPath(d));
+        } else ctx.stroke(this.linePath(d));
         for (const [x, y] of d) {
           ctx.beginPath();
           ctx.arc(x, y, Math.max(3, 5 * px), 0, Math.PI * 2);
@@ -577,7 +587,7 @@ export class Plan2D implements WorldRenderer {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (e.metaKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
-    if (k === 'enter' && this.tools.tool === 'transit') return this.finishLine();
+    if (k === 'enter' && (this.tools.tool === 'transit' || this.tools.tool === 'zone')) return this.finishDraft();
     if (k === 'escape') {
       this.tools.cancel();
       this.select(null);
