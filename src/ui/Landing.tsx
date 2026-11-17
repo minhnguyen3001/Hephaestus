@@ -4,7 +4,7 @@ import type { Place } from '../geo/types';
 import { deleteProject, listProjects, type Project } from '../project/store';
 import { SearchBox } from './SearchBox';
 
-export function Landing({ onOpenPlace, onOpenProject }: { onOpenPlace: (p: Place) => void; onOpenProject: (p: Project) => void }) {
+export function Landing({ onOpenPlace, onOpenProject, notice }: { onOpenPlace: (p: Place) => void; onOpenProject: (p: Project) => void; notice?: string | null }) {
   const [projects, setProjects] = useState(listProjects);
 
   return (
@@ -23,6 +23,7 @@ export function Landing({ onOpenPlace, onOpenProject }: { onOpenPlace: (p: Place
           Search anywhere on Earth. Walk its real streets in 3D, redraw its roads and skyline, and watch a living city of people,
           cars, motorbikes, buses and trains respond.
         </p>
+        {notice && <p className="notice" role="alert">{notice}</p>}
         <SearchBox onPick={onOpenPlace} autoFocus />
         <section className="featured">
           <h2>Start somewhere iconic</h2>

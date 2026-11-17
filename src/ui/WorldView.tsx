@@ -3,7 +3,8 @@ import { fetchAreas, fetchWorld } from '../geo/osm';
 import { fetchTerrain } from '../geo/terrain';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
-import { saveProject, type Project } from '../project/store';
+import { encodePlan } from '../project/share';
+import { saveProject, withScenarios, type Project, type Scenario } from '../project/store';
 import { Engine, type CameraMode, type Layers, type Perf, type Selection, type Tool, type WorldRenderer } from '../render/engine';
 import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
@@ -41,11 +42,16 @@ function readQuality(): QualitySetting {
 }
 
 export default function WorldView({ project: initial, onExit, onOpenPlace }: { project: Project; onExit: () => void; onOpenPlace: (p: Place) => void }) {
-  const [project, setProject] = useState(initial);
+  const [project, setProject] = useState(() => withScenarios(initial));
+  const projectRef = useRef(project);
+  projectRef.current = project;
   const [base, setBase] = useState<WorldData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [history, setHistory] = useState<History>({ edits: initial.edits, redo: [] });
+  const [history, setHistory] = useState<History>(() => {
+    const p = withScenarios(initial);
+    return { edits: p.scenarios.find((s) => s.id === p.active)!.edits, redo: [] };
+  });
   const [view, setView] = useState<'proposed' | 'original'>('proposed');
   const [tool, setTool] = useState<Tool>('select');
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -70,6 +76,13 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
 
   const host = useRef<HTMLDivElement>(null);
+  const pendingView = useRef(true);
+  const restoreView = (r: WorldRenderer) => {
+    if (!pendingView.current) return;
+    pendingView.current = false;
+    const v = mode === '3d' ? projectRef.current.view3d : projectRef.current.view2d;
+    if (v) r.setView(v);
+  };
   const engine = useRef<WorldRenderer | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -80,6 +93,14 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const originalMetrics = useMemo(() => (base ? cityMetrics(base) : null), [base]);
+  const activeScenario = project.scenarios.find((s) => s.id === project.active)!;
+  // Static indicators for every scenario, for side-by-side comparison (the active one uses live edits).
+  const comparison = useMemo(
+    () => (base && project.scenarios.length > 1
+      ? project.scenarios.map((s) => ({ name: s.name, active: s.id === project.active, metrics: cityMetrics(applyEdits(base, s.id === project.active ? history.edits : s.edits)) }))
+      : null),
+    [base, project.scenarios, project.active, history.edits],
+  );
   const proposedMetrics = useMemo(() => (proposed ? cityMetrics(proposed) : null), [proposed]);
 
   const edit = useCallback((e: Edit) => {
@@ -115,7 +136,11 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       }
     } else r = new Plan2D(host.current, callbacks);
     engine.current = r;
-    if (shownRef.current) r.setWorld(shownRef.current, region);
+    pendingView.current = true;
+    if (shownRef.current) {
+      r.setWorld(shownRef.current, region);
+      restoreView(r);
+    }
     return () => {
       r.dispose();
       engine.current = null;
@@ -123,8 +148,26 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }, [quality, region, edit, mode]);
 
   useEffect(() => {
-    if (shown) engine.current?.setWorld(shown, region);
+    if (!shown || !engine.current) return;
+    engine.current.setWorld(shown, region);
+    restoreView(engine.current);
   }, [shown, region]);
+
+  // Remember the camera per project (and per 2D/3D view).
+  useEffect(() => {
+    const t = setInterval(() => {
+      const r = engine.current;
+      if (!r || pendingView.current) return;
+      const v = r.getView();
+      const key = mode === '3d' ? 'view3d' : 'view2d';
+      const p = projectRef.current;
+      if (JSON.stringify(p[key]) === JSON.stringify(v)) return;
+      const next = { ...p, [key]: v };
+      setProject(next);
+      saveProject(next);
+    }, 4000);
+    return () => clearInterval(t);
+  }, [mode]);
 
   useEffect(() => {
     engine.current?.setTool(view === 'original' ? 'select' : tool);
@@ -168,7 +211,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     }
     setSaveState('saving');
     const t = setTimeout(() => {
-      const next = { ...project, edits: history.edits };
+      const p = projectRef.current;
+      const next = { ...p, edits: history.edits, scenarios: p.scenarios.map((s) => (s.id === p.active ? { ...s, edits: history.edits } : s)) };
       setProject(next);
       setSaveState(saveProject(next) ? 'saved' : 'error');
     }, 600);
@@ -201,6 +245,55 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }, []);
 
   const setCam = (m: CameraMode) => engine.current?.setCameraMode(m);
+
+  const commit = (next: typeof project) => {
+    projectRef.current = next;
+    setProject(next);
+    setSaveState(saveProject(next) ? 'saved' : 'error');
+  };
+  const withLiveEdits = () => {
+    const p = projectRef.current;
+    return { ...p, scenarios: p.scenarios.map((s) => (s.id === p.active ? { ...s, edits: history.edits } : s)) };
+  };
+  const switchScenario = (id: string, p = withLiveEdits()) => {
+    const target = p.scenarios.find((s) => s.id === id);
+    if (!target) return;
+    commit({ ...p, active: id, edits: target.edits });
+    setHistory({ edits: target.edits, redo: [] });
+    setView('proposed');
+    engine.current?.select(null);
+  };
+  const scenarioAction = (v: string) => {
+    const p = withLiveEdits();
+    if (v === '__new' || v === '__dup') {
+      const used = new Set(p.scenarios.map((s) => s.name));
+      let n = p.scenarios.length;
+      while (used.has(`Proposal ${String.fromCharCode(65 + (n % 26))}`)) n++;
+      const sc: Scenario = { id: `s${Date.now().toString(36)}`, name: `Proposal ${String.fromCharCode(65 + (n % 26))}`, edits: v === '__dup' ? history.edits : [] };
+      switchScenario(sc.id, { ...p, scenarios: [...p.scenarios, sc] });
+      setHint(v === '__dup' ? `${sc.name} starts as a copy — change it and compare in the dashboard.` : `${sc.name} starts from today’s city.`);
+    } else if (v === '__ren') {
+      const name = window.prompt('Rename scenario', activeScenario.name)?.trim();
+      if (name) commit({ ...p, scenarios: p.scenarios.map((s) => (s.id === p.active ? { ...s, name } : s)) });
+    } else if (v === '__del') {
+      if (p.scenarios.length < 2 || !window.confirm(`Delete “${activeScenario.name}”? This cannot be undone.`)) return;
+      const rest = p.scenarios.filter((s) => s.id !== p.active);
+      switchScenario(rest[0].id, { ...p, scenarios: rest });
+    } else switchScenario(v, p);
+  };
+  const share = async () => {
+    const code = await encodePlan({
+      v: 1, name: `${project.name} — ${activeScenario.name}`, place: project.place, radius: project.radius,
+      edits: history.edits, view: engine.current?.getView(),
+    });
+    const url = `${location.origin}${location.pathname}#plan=${code}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setHint('Share link copied. Anyone can open this plan — no account needed.');
+    } catch {
+      window.prompt('Copy this link to share your plan:', url);
+    }
+  };
   const dismissOnboard = () => {
     setOnboard(false);
     try {
@@ -229,10 +322,18 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         </div>
         <SearchBox compact onPick={onOpenPlace} />
         <div className="top-actions">
-          <div className="seg" role="group" aria-label="Scenario">
+          <div className="seg" role="group" aria-label="Original or proposed city">
             <button className={view === 'original' ? 'on' : ''} onClick={() => setView('original')}>Original</button>
             <button className={view === 'proposed' ? 'on' : ''} onClick={() => setView('proposed')}>Proposed{history.edits.length ? ` · ${history.edits.length}` : ''}</button>
           </div>
+          <select className="scenario" value={project.active} onChange={(e) => scenarioAction(e.target.value)} aria-label="Scenario">
+            {project.scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            <option value="__new">+ New scenario</option>
+            <option value="__dup">+ Duplicate this one</option>
+            <option value="__ren">Rename…</option>
+            {project.scenarios.length > 1 && <option value="__del">Delete this scenario</option>}
+          </select>
+          <button className="share" onClick={share} title="Copy a link to this plan">Share</button>
           <select value={quality} onChange={(e) => {
             const q = e.target.value as QualitySetting;
             setQuality(q);
@@ -305,7 +406,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
+        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}
 
       <SimBar

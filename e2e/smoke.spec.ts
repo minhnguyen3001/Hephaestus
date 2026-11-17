@@ -162,3 +162,33 @@ test('draw a metro line and see riders', async ({ page }) => {
   const text = await page.locator('.lines').innerText();
   expect(text).toMatch(/Metro A/);
 });
+
+test('scenarios, comparison and share link round-trip', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  // Proposal A: one building outside the loaded circle.
+  await page.getByRole('button', { name: 'Place building' }).click();
+  await page.mouse.click(box.x + box.width * 0.08, box.y + box.height * 0.4);
+  await expect(page.getByRole('button', { name: /Proposed · 1/ })).toBeVisible();
+  // Proposal B: duplicate, then add another.
+  await page.getByLabel('Scenario').selectOption('__dup');
+  await page.mouse.click(box.x + box.width * 0.1, box.y + box.height * 0.5);
+  await expect(page.getByRole('button', { name: /Proposed · 2/ })).toBeVisible();
+  await expect(page.locator('.compare')).toContainText('Proposal B');
+  await page.getByLabel('Scenario').selectOption({ label: 'Proposal A' });
+  await expect(page.getByRole('button', { name: /Proposed · 1/ })).toBeVisible();
+  // Share and reopen in a fresh page.
+  await page.getByRole('button', { name: 'Share' }).click();
+  await expect(page.locator('.hint')).toContainText('Share link copied');
+  const url = await page.evaluate(() => navigator.clipboard.readText());
+  expect(url).toContain('#plan=');
+  const other = await context.newPage();
+  await other.goto(url);
+  await expect(other.getByRole('button', { name: /Proposed · 1/ })).toBeVisible({ timeout: 30_000 });
+  await expect(other.locator('.project input')).toHaveValue(/Shibuya — Proposal A/);
+});

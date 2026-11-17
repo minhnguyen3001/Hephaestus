@@ -1,4 +1,5 @@
 import type { Building, Road, Vec2, WorldData } from '../geo/types';
+import type { SavedView } from '../project/store';
 import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
@@ -162,6 +163,16 @@ export class Plan2D implements WorldRenderer {
 
   finishLine() {
     this.tools.finishLine(this.world);
+  }
+
+  getView(): SavedView {
+    return { center: [Math.round(this.cx * 10) / 10, Math.round(this.cy * 10) / 10], scale: Math.round(this.scale * 1000) / 1000 };
+  }
+
+  setView(v: SavedView) {
+    if (!v.center || !v.scale) return;
+    [this.cx, this.cy] = v.center;
+    this.scale = v.scale;
   }
 
   setLineMode(m: 'bus' | 'metro') {

@@ -1,14 +1,40 @@
 import type { Place } from '../geo/types';
 import type { Edit } from './edits';
 
+export interface Scenario {
+  id: string;
+  name: string;
+  edits: Edit[];
+}
+
+/** Saved camera: 3D = orbit target + camera position (three.js coords); 2D = centre + scale. */
+export interface SavedView {
+  target?: [number, number, number];
+  position?: [number, number, number];
+  center?: [number, number];
+  scale?: number;
+}
+
 export interface Project {
   id: string;
   name: string;
   place: Place;
   radius: number;
+  /** Edits of the active scenario (kept for older saves and the project list). */
   edits: Edit[];
+  scenarios?: Scenario[];
+  active?: string;
+  view3d?: SavedView;
+  view2d?: SavedView;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Older projects had a single edit list; give every project at least one named scenario. */
+export function withScenarios(p: Project): Project & { scenarios: Scenario[]; active: string } {
+  const scenarios = p.scenarios?.length ? p.scenarios : [{ id: 's1', name: 'Proposal A', edits: p.edits ?? [] }];
+  const active = scenarios.some((s) => s.id === p.active) ? p.active! : scenarios[0].id;
+  return { ...p, scenarios, active };
 }
 
 /**
@@ -44,7 +70,7 @@ export function deleteProject(id: string) {
   }
 }
 
-export function newProject(place: Place, radius: number): Project {
+export function newProject(place: Place, radius: number, edits: Edit[] = []): Project {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), name: place.name, place, radius, edits: [], createdAt: now, updatedAt: now };
+  return { id: crypto.randomUUID(), name: place.name, place, radius, edits, scenarios: [{ id: 's1', name: 'Proposal A', edits }], active: 's1', createdAt: now, updatedAt: now };
 }

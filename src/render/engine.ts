@@ -5,6 +5,7 @@ import type { Area, Building, Road, Vec2, WorldData } from '../geo/types';
 import { sampleTerrain } from '../geo/terrain';
 import { centroid, dist } from '../geo/util';
 import type { Edit } from '../project/edits';
+import type { SavedView } from '../project/store';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
@@ -50,6 +51,8 @@ export interface WorldRenderer {
   orbitStep(radians: number): void;
   finishLine(): void;
   setLineMode(m: 'bus' | 'metro'): void;
+  getView(): SavedView;
+  setView(v: SavedView): void;
   dispose(): void;
 }
 
@@ -598,6 +601,18 @@ export class Engine implements WorldRenderer {
 
   finishLine() {
     this.tools.finishLine(this.world);
+  }
+
+  getView(): SavedView {
+    const r = (v: THREE.Vector3) => v.toArray().map((x) => Math.round(x * 10) / 10) as [number, number, number];
+    return { target: r(this.controls.target), position: r(this.camera.position) };
+  }
+
+  setView(v: SavedView) {
+    if (!v.target || !v.position) return;
+    this.tween = undefined;
+    this.controls.target.fromArray(v.target);
+    this.camera.position.fromArray(v.position);
   }
 
   setLineMode(m: 'bus' | 'metro') {

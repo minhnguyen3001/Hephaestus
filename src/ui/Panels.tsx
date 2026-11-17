@@ -145,7 +145,7 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, onRemoveLine }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; onRemoveLine?: (id: string) => void }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void }) {
   const delta = (a: number, b: number, digits = 0) => {
     const d = a - b;
     if (Math.abs(d) < 10 ** -digits / 2) return null;
@@ -165,6 +165,23 @@ export function Dashboard({ stats, proposed, original, region, editCount, onRemo
         <Metric label="Green space" value={`${proposed.greenHa.toFixed(1)} ha`} />
         <Metric label="Buildings" value={fmt(proposed.buildings)} d={delta(proposed.buildings, original.buildings)} />
       </div>
+      {comparison && (
+        <>
+          <h4>Compare scenarios</h4>
+          <div className="compare-wrap">
+            <table className="compare">
+              <thead>
+                <tr><th /><th>Today</th>{comparison.map((c) => <th key={c.name} className={c.active ? 'on' : ''}>{c.name}</th>)}</tr>
+              </thead>
+              <tbody>
+                {([['Housing', (m: CityMetrics) => fmt(m.residents)], ['Jobs', (m: CityMetrics) => fmt(m.jobs)], ['Floor km²', (m: CityMetrics) => m.floorAreaKm2.toFixed(2)], ['Road km', (m: CityMetrics) => m.roadKm.toFixed(1)], ['Buildings', (m: CityMetrics) => fmt(m.buildings)]] as const).map(([label, f]) => (
+                  <tr key={label}><th>{label}</th><td>{f(original)}</td>{comparison.map((c) => <td key={c.name} className={c.active ? 'on' : ''}>{f(c.metrics)}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
       <h4>Live simulation</h4>
       {stats ? (
         <>
