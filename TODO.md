@@ -19,7 +19,8 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 ## P2
 - [ ] More roof shapes (hipped, flat with parapets); regional facade palettes
 - [x] Road tunnels: in the network, rendered in x-ray, agents shown underground
-- [ ] Larger areas: tiled loading around the camera (now: "load the city here" opens a new area)
+- [x] Larger areas: 1 km tiles stream around the camera (budget by quality); static tiles for featured cities
+- [ ] Pre-build reach-2 tiles (5×5 km) for featured cities if repo size allows; consider a free CDN for bigger tile sets
 - [ ] ~~Geometry build in a worker~~ not needed: profiling (`scripts/profile-load.ts`) shows the full data pipeline is ~160 ms; terrain no longer blocks first render
 - [x] Parking search (garages preferred) and taxi pickups
 - [x] Public holiday demand profile

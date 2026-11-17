@@ -26,6 +26,12 @@ A broad, working product. A user can:
 
 Not built: any backend (accounts, cloud save, real-time collaboration). It's deferred because of the zero-cost constraint; share links and notes cover sharing for now.
 
+## Map size and streaming (2026-11-17)
+- The city streams in as 1 km tiles around the camera (`src/geo/tiles.ts`, `fetchTile` in `src/geo/osm.ts`). The budget is 12/30/60 tiles for Low/Medium/High.
+- Featured cities: the centre comes from `public/packs/`, and the surrounding tiles from `public/tiles/<pack>/<i>_<j>.json`. Build them with `npx tsx scripts/build-city-tiles.ts [reach] ["City"]`. Anything else streams live from public Overpass, which is slow when busy (about 1–2 min per tile).
+- The scene is chunked (~300 m) and incremental. Picking culls by chunk, and ground picking steps through the heightfield. Edits apply in about 60 ms under 4× throttle.
+- Terrain tiles are decoded without colour management (this fixed the spike artefacts) and despiked.
+
 ## Technical map
 | Area | Files |
 | --- | --- |
