@@ -158,6 +158,15 @@ describe('simulation', () => {
     expect(sim.agents.length - buses).toBeGreaterThan(100);
   });
 
+  it('exposes signal heads and per-road speed ratios', () => {
+    const sim = new Simulation(gridFixture(), profileFor('us'), 150, 4);
+    expect(sim.signalApproaches().length).toBeGreaterThanOrEqual(3);
+    sim.step(30);
+    const { ids, ratio } = sim.roadSpeeds();
+    expect(ids.length).toBeGreaterThan(0);
+    for (const r of ratio) expect(r).toBeGreaterThanOrEqual(0), expect(r).toBeLessThanOrEqual(1);
+  });
+
   it('stops cars at red lights', () => {
     const w = gridFixture();
     const sim = new Simulation(w, profileFor('us'), 10, 3);

@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geo/types';
-import { AGENT_KINDS, type AgentInfo, type AgentKind, type SimStats, type Simulation, type TrainCar } from './simulation';
+import { AGENT_KINDS, type AgentInfo, type AgentKind, type SignalHead, type SimStats, type Simulation, type TrainCar } from './simulation';
 
 export type ToWorker =
   | { t: 'init'; world: unknown; region: unknown; maxAgents: number; seed: number; time: number }
@@ -14,13 +14,17 @@ export interface Frame {
   trains: TrainCar[];
   stats: SimStats;
   watched: AgentInfo | null;
+  speeds?: { ids: string[]; ratio: number[] };
 }
 
 export interface Info {
   t: 'info';
   routes: Vec2[][];
   stops: Vec2[];
+  signals: SignalHead[];
 }
+
+export const infoOf = (sim: Simulation): Info => ({ t: 'info', routes: sim.busRouteLines(), stops: sim.stopPositions(), signals: sim.signalApproaches() });
 
 export interface AgentView {
   id: number;
@@ -33,7 +37,7 @@ export interface AgentView {
 
 export const STRIDE = 6;
 
-export function encodeFrame(sim: Simulation, watched: number | null): Frame {
+export function encodeFrame(sim: Simulation, watched: number | null, withSpeeds = false): Frame {
   const buf = new Float32Array(sim.agents.length * STRIDE);
   sim.agents.forEach((a, i) => {
     const o = i * STRIDE;
@@ -44,7 +48,7 @@ export function encodeFrame(sim: Simulation, watched: number | null): Frame {
     buf[o + 4] = a.hx;
     buf[o + 5] = a.hy;
   });
-  return { t: 'frame', time: sim.time, buf, trains: sim.trainCars(), stats: sim.stats(), watched: watched === null ? null : sim.describe(watched) };
+  return { t: 'frame', time: sim.time, buf, trains: sim.trainCars(), stats: sim.stats(), watched: watched === null ? null : sim.describe(watched), speeds: withSpeeds ? sim.roadSpeeds() : undefined };
 }
 
 export function decodeAgents(buf: Float32Array): AgentView[] {

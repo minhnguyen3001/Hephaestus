@@ -3,7 +3,8 @@ import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
-import type { CameraMode, EngineCallbacks, Layers, WorldRenderer } from './engine';
+import { signalPhase } from '../sim/simulation';
+import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS } from './palette';
 import { PRESETS } from './quality';
 import { pickMode, ToolController, type Hit, type Tool } from './tools';
@@ -39,7 +40,8 @@ export class Plan2D implements WorldRenderer {
   private cx = 0;
   private cy = 0;
   private scale = 1; // px per meter
-  private layers: Layers = { agents: true, transit: true, estimated: false };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false };
+  private roadById = new Map<string, { path: Path2D; width: number }>();
   private fills: { color: string; path: Path2D }[] = [];
   private roadPaths: { width: number; color: string; path: Path2D }[] = [];
   private areaPaths: { color: string; path: Path2D }[] = [];
@@ -199,6 +201,7 @@ export class Plan2D implements WorldRenderer {
     this.fills = [...groups].map(([color, path]) => ({ color, path }));
 
     const roads = new Map<string, { width: number; color: string; path: Path2D }>();
+    this.roadById.clear();
     for (const r of w.roads) {
       if (r.tunnel) continue;
       const color = hex(r.origin === 'proposed' ? mix(ROAD_COLORS[r.kind], PROPOSED_COLOR, 0.45) : ROAD_COLORS[r.kind]);
@@ -206,7 +209,9 @@ export class Plan2D implements WorldRenderer {
       const k = `${color}|${width}`;
       const g = roads.get(k) ?? { width, color, path: new Path2D() };
       roads.set(k, g);
-      g.path.addPath(this.linePath(r.points));
+      const path = this.linePath(r.points);
+      g.path.addPath(path);
+      this.roadById.set(r.id, { path, width });
     }
     // wide roads first so narrow ones draw on top
     this.roadPaths = [...roads.values()].sort((a, b) => b.width - a.width);
@@ -327,6 +332,15 @@ export class Plan2D implements WorldRenderer {
         ctx.lineWidth = Math.max(r.width, px);
         ctx.stroke(r.path);
       }
+      if (this.layers.traffic && this.sim) {
+        for (const [id, r] of this.sim.roadSpeed) {
+          const road = this.roadById.get(id);
+          if (!road) continue;
+          ctx.strokeStyle = `#${trafficColor(r).getHexString()}`;
+          ctx.lineWidth = Math.max(road.width * 0.8, 2 * px);
+          ctx.stroke(road.path);
+        }
+      }
       ctx.setLineDash([4 * px, 3 * px]);
       ctx.strokeStyle = '#5b5450';
       ctx.lineWidth = Math.max(2.4, 1.5 * px);
@@ -349,6 +363,15 @@ export class Plan2D implements WorldRenderer {
         ctx.globalAlpha = 1;
         ctx.fillStyle = hex(this.region.busColor);
         for (const [x, y] of this.sim.info.stops) ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+      }
+      if (this.sim && this.scale > 0.7) {
+        for (const h of this.sim.info.signals) {
+          const st = signalPhase(this.sim.time, h.offset, h.group);
+          ctx.fillStyle = st === 'green' ? '#22dd66' : st === 'yellow' ? '#ffc21a' : '#ff3b30';
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, Math.max(0.9, 2.5 * px), 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       this.drawSelection(px);
       if (this.layers.agents && this.sim) this.drawAgents(px);

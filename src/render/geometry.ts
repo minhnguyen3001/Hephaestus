@@ -152,6 +152,7 @@ export class PickMesh {
   readonly mesh: THREE.Mesh;
   private starts: number[] = [];
   private ids: string[] = [];
+  private base?: Float32Array;
 
   constructor(items: { id: string; geom: THREE.BufferGeometry }[], material: THREE.Material) {
     let tri = 0;
@@ -174,6 +175,27 @@ export class PickMesh {
       else hi = mid - 1;
     }
     return this.ids[lo];
+  }
+
+  /** Recolour items by id (null = original colour). Ids ending in '#m' (decorations) are left alone. */
+  paint(colorFor: (id: string) => THREE.Color | null) {
+    const attr = this.mesh.geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
+    if (!attr) return;
+    const arr = attr.array as Float32Array;
+    this.base ??= arr.slice();
+    const total = attr.count / 3;
+    for (let i = 0; i < this.ids.length; i++) {
+      const id = this.ids[i];
+      if (id.endsWith('#m')) continue;
+      const c = colorFor(id);
+      const end = (i + 1 < this.starts.length ? this.starts[i + 1] : total) * 9;
+      for (let k = this.starts[i] * 9; k < end; k += 3) {
+        arr[k] = c ? c.r : this.base[k];
+        arr[k + 1] = c ? c.g : this.base[k + 1];
+        arr[k + 2] = c ? c.b : this.base[k + 2];
+      }
+    }
+    attr.needsUpdate = true;
   }
 
   dispose() {

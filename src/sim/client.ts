@@ -1,7 +1,7 @@
 import type { Vec2, WorldData } from '../geo/types';
-import { decodeAgents, encodeFrame, type AgentView, type Frame, type Info, type ToWorker } from './protocol';
+import { decodeAgents, encodeFrame, infoOf, type AgentView, type Frame, type Info, type ToWorker } from './protocol';
 import type { RegionProfile } from './region';
-import { Simulation, type AgentInfo, type SimStats, type TrainCar } from './simulation';
+import { Simulation, type AgentInfo, type SignalHead, type SimStats, type TrainCar } from './simulation';
 
 /**
  * Runs the simulation off the main thread (Web Worker) when possible, inline otherwise.
@@ -12,7 +12,10 @@ export class SimClient {
   agents: AgentView[] = [];
   trains: TrainCar[] = [];
   stats: SimStats | null = null;
-  info: { routes: Vec2[][]; stops: Vec2[] } = { routes: [], stops: [] };
+  info: { routes: Vec2[][]; stops: Vec2[]; signals: SignalHead[] } = { routes: [], stops: [], signals: [] };
+  /** Smoothed speed ratio per road id (1 = free flow), for the traffic layer. */
+  roadSpeed = new Map<string, number>();
+  private frameNo = 0;
   onInfo?: () => void;
   private worker: Worker | null = null;
   private inline: Simulation | null = null;
@@ -54,7 +57,7 @@ export class SimClient {
     this.inline = new Simulation(world, region, maxAgents, seed);
     this.inline.time = time;
     this.inline.step(0);
-    this.receive({ t: 'info', routes: this.inline.busRouteLines(), stops: this.inline.stopPositions() });
+    this.receive(infoOf(this.inline));
     this.receive(encodeFrame(this.inline, this.watched));
   }
 
@@ -64,7 +67,7 @@ export class SimClient {
 
   private receive(m: Frame | Info) {
     if (m.t === 'info') {
-      this.info = { routes: m.routes, stops: m.stops };
+      this.info = { routes: m.routes, stops: m.stops, signals: m.signals };
       this.onInfo?.();
       return;
     }
@@ -74,13 +77,19 @@ export class SimClient {
     this.trains = m.trains;
     this.stats = m.stats;
     this.watchedInfo = m.watched;
+    if (m.speeds) {
+      const seen = new Set(m.speeds.ids);
+      m.speeds.ids.forEach((id, i) => this.roadSpeed.set(id, 0.6 * (this.roadSpeed.get(id) ?? m.speeds!.ratio[i]) + 0.4 * m.speeds!.ratio[i]));
+      // roads that emptied drift back toward free flow
+      for (const [id, v] of this.roadSpeed) if (!seen.has(id)) this.roadSpeed.set(id, v + (1 - v) * 0.2);
+    }
   }
 
   /** Advance by dt simulated seconds. In worker mode, time accumulates while the previous step is in flight. */
   step(dt: number) {
     if (this.inline) {
       this.inline.step(dt);
-      this.receive(encodeFrame(this.inline, this.watched));
+      this.receive(encodeFrame(this.inline, this.watched, this.frameNo++ % 15 === 0));
       return;
     }
     this.pendingDt += dt;

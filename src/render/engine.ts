@@ -9,7 +9,7 @@ import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
 import type { AgentView } from '../sim/protocol';
-import { AGENT_KINDS, type AgentInfo, type AgentKind, type SimStats } from '../sim/simulation';
+import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type SimStats } from '../sim/simulation';
 
 export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
@@ -63,6 +63,15 @@ export interface Layers {
   agents: boolean;
   transit: boolean;
   estimated: boolean;
+  traffic: boolean;
+}
+
+const FREE = new THREE.Color(0x3cb371);
+const SLOW = new THREE.Color(0xf2c230);
+const JAM = new THREE.Color(0xe5484d);
+/** Speed ratio (1 = free flow) to a green → yellow → red ramp. */
+export function trafficColor(r: number, out = new THREE.Color()) {
+  return r > 0.6 ? out.copy(SLOW).lerp(FREE, Math.min(1, (r - 0.6) / 0.3)) : out.copy(JAM).lerp(SLOW, Math.max(0, (r - 0.15) / 0.45));
 }
 
 const ROAD_Y: Record<string, number> = {
@@ -127,7 +136,10 @@ export class Engine implements WorldRenderer {
   private fastSeconds = 0;
   private quality: Quality;
   private pixelRatio: number;
-  private layers: Layers = { agents: true, transit: true, estimated: false };
+  private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false };
+  private trafficT = 0;
+  private signalPoles?: THREE.InstancedMesh;
+  private signalLights?: THREE.InstancedMesh;
   private raycaster = new THREE.Raycaster();
   private down?: { x: number; y: number; t: number };
   private ro: ResizeObserver;
@@ -230,8 +242,11 @@ export class Engine implements WorldRenderer {
 
   setLayers(l: Layers) {
     const restyle = l.estimated !== this.layers.estimated;
+    const trafficOff = this.layers.traffic && !l.traffic;
     this.layers = l;
     this.transitGroup.visible = l.transit;
+    if (trafficOff) this.roads?.paint(() => null);
+    this.trafficT = 99;
     if (restyle && this.world) this.buildStatic();
   }
 
@@ -420,7 +435,7 @@ export class Engine implements WorldRenderer {
       if (g) roadItems.push({ id: road.id, geom: g });
       if (!road.oneway && road.lanes >= 2 && road.kind !== 'service' && road.kind !== 'footway' && road.kind !== 'cycleway') {
         const c = ribbonGeometry(road.points, 0.18, (p) => this.hp(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
-        if (c) roadItems.push({ id: road.id, geom: c });
+        if (c) roadItems.push({ id: `${road.id}#m`, geom: c });
       }
     }
     this.roads = new PickMesh(roadItems, this.flatMat);
@@ -508,12 +523,59 @@ export class Engine implements WorldRenderer {
     if (geoms.length) {
       this.transitGroup.add(new THREE.Mesh(mergeGeometries(geoms)!, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false })));
     }
+    this.buildSignals();
     const stops = this.sim.info.stops;
     if (stops.length) {
       const m = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.6, 3.2, 8).translate(0, 1.6, 0), new THREE.MeshStandardMaterial({ color: this.region.busColor, emissive: this.region.busColor, emissiveIntensity: 0.25 }), stops.length);
       stops.forEach((p, i) => m.setMatrixAt(i, this.tmpM.makeTranslation(p[0] + 3, this.h(p[0] + 3, p[1] + 3), -p[1] - 3)));
       this.transitGroup.add(m);
     }
+  }
+
+  private buildSignals() {
+    for (const m of [this.signalPoles, this.signalLights]) {
+      if (!m) continue;
+      this.scene.remove(m);
+      m.geometry.dispose();
+    }
+    this.signalPoles = this.signalLights = undefined;
+    const heads = this.sim?.info.signals ?? [];
+    if (!heads.length) return;
+    const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.12, 4.6, 6).translate(0, 2.3, 0), new THREE.MeshStandardMaterial({ color: 0x3a3f46 }), heads.length);
+    const lights = new THREE.InstancedMesh(new THREE.BoxGeometry(0.45, 1.1, 0.35).translate(0, 4.9, 0), new THREE.MeshBasicMaterial(), heads.length);
+    heads.forEach((h, i) => {
+      this.tmpM.makeRotationY(Math.atan2(h.hx, -h.hy)).setPosition(h.x, this.h(h.x, h.y) + this.lift, -h.y);
+      poles.setMatrixAt(i, this.tmpM);
+      lights.setMatrixAt(i, this.tmpM);
+      lights.setColorAt(i, this.tmpC.setHex(0x22dd66));
+    });
+    this.signalPoles = poles;
+    this.signalLights = lights;
+    this.scene.add(poles, lights);
+  }
+
+  private updateSignals() {
+    const heads = this.sim?.info.signals;
+    const m = this.signalLights;
+    if (!heads || !m || !this.sim) return;
+    const t = this.sim.time;
+    heads.forEach((h, i) => {
+      const st = signalPhase(t, h.offset, h.group);
+      m.setColorAt(i, this.tmpC.setHex(st === 'green' ? 0x22dd66 : st === 'yellow' ? 0xffc21a : 0xff3b30));
+    });
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }
+
+  private updateTraffic(dt: number) {
+    this.trafficT += dt;
+    if (!this.layers.traffic || this.trafficT < 1 || !this.roads || !this.sim) return;
+    this.trafficT = 0;
+    const speeds = this.sim.roadSpeed;
+    const c = new THREE.Color();
+    this.roads.paint((id) => {
+      const r = speeds.get(id);
+      return r === undefined ? null : trafficColor(r, c);
+    });
   }
 
   private refreshSelection() {
@@ -568,6 +630,8 @@ export class Engine implements WorldRenderer {
     // Simulation runs on wall-clock time so a slow GPU never slows the city down (capped after tab switches).
     if (this.sim && this.running) this.sim.step(Math.min(1, raw) * this.speed);
     this.updateAgents();
+    this.updateSignals();
+    this.updateTraffic(dt);
     this.updateCamera(dt);
     this.controls.update();
     const floor = this.h(this.camera.position.x, -this.camera.position.z) + 1.5;
@@ -810,7 +874,7 @@ export class Engine implements WorldRenderer {
       if (a) return { kind: 'agent' as const, id: a.id, p };
     }
     if (o === this.buildings?.mesh && hit.faceIndex != null) return { kind: 'building' as const, id: this.buildings.idAt(hit.faceIndex)!, p };
-    if (o === this.roads?.mesh && hit.faceIndex != null) return { kind: 'road' as const, id: this.roads.idAt(hit.faceIndex)!, p };
+    if (o === this.roads?.mesh && hit.faceIndex != null) return { kind: 'road' as const, id: this.roads.idAt(hit.faceIndex)!.replace(/#m$/, ''), p };
     return { kind: 'ground' as const, id: '', p };
   }
 

@@ -3,6 +3,8 @@ import { centroid, dist, hash01, makeSampler, polylineLength, rng, signedArea } 
 import { LANE_WIDTH, RoadGraph, type GEdge } from './graph';
 import type { RegionProfile, TravelMode } from './region';
 
+const CYCLE = 64;
+
 export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus';
 export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus'];
 export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to bus stop' | 'bus service';
@@ -93,6 +95,22 @@ export interface SimStats {
 
 export type SignalState = 'green' | 'yellow' | 'red';
 
+export interface SignalHead {
+  x: number;
+  y: number;
+  hx: number;
+  hy: number;
+  offset: number;
+  group: 0 | 1;
+}
+
+/** Two-group fixed-time plan: 28 s green, 3 s yellow, 1 s all-red per group on a 64 s cycle. */
+export function signalPhase(t: number, offset: number, group: number): SignalState {
+  const ph = (((t + offset) % CYCLE) + CYCLE) % CYCLE;
+  const local = group === 0 ? ph : (ph + CYCLE / 2) % CYCLE;
+  return local < 28 ? 'green' : local < 31 ? 'yellow' : 'red';
+}
+
 /** Inspector-friendly description of one agent. */
 export interface AgentInfo {
   id: number;
@@ -105,7 +123,6 @@ export interface AgentInfo {
   cap?: number;
 }
 
-const CYCLE = 64;
 const VEHICLE: Record<'car' | 'taxi' | 'motorcycle' | 'truck' | 'bus', { len: number; vmax: number; acc: number }> = {
   car: { len: 4.6, vmax: 1, acc: 2.5 },
   taxi: { len: 4.8, vmax: 1.05, acc: 2.6 },
@@ -224,9 +241,49 @@ export class Simulation {
     const sig = this.signals.get(e.to);
     if (!sig) return 'green';
     const group = Math.abs(e.dir[0] * sig.axis[0] + e.dir[1] * sig.axis[1]) > 0.7071 ? 0 : 1;
-    const ph = (((t + sig.offset) % CYCLE) + CYCLE) % CYCLE;
-    const local = group === 0 ? ph : (ph + CYCLE / 2) % CYCLE;
-    return local < 28 ? 'green' : local < 31 ? 'yellow' : 'red';
+    return signalPhase(t, sig.offset, group);
+  }
+
+  /** One signal head per car approach, placed at the curb before the stop line (for rendering). */
+  signalApproaches(): SignalHead[] {
+    const out: SignalHead[] = [];
+    const side = this.region.driveSide === 'right' ? 1 : -1;
+    for (const e of this.graph.edges) {
+      const sig = this.signals.get(e.to);
+      if (!sig || !e.car || e.len < 8) continue;
+      const p = this.graph.nodes[e.to].p;
+      const off = (e.halfWidth + 1.2) * side;
+      out.push({
+        x: p[0] - e.dir[0] * 4 + e.dir[1] * off,
+        y: p[1] - e.dir[1] * 4 - e.dir[0] * off,
+        hx: e.dir[0],
+        hy: e.dir[1],
+        offset: sig.offset,
+        group: Math.abs(e.dir[0] * sig.axis[0] + e.dir[1] * sig.axis[1]) > 0.7071 ? 0 : 1,
+      });
+    }
+    return out;
+  }
+
+  /** Mean speed / speed limit per road for roads with vehicles on them right now (1 = free flow). */
+  roadSpeeds(): { ids: string[]; ratio: number[] } {
+    const acc = new Map<string, [number, number]>();
+    for (const a of this.agents) {
+      if (!isVehicle(a.kind) || a.dwell > 0) continue;
+      const e = this.graph.edges[a.path[a.pi]];
+      if (!e) continue;
+      const r = acc.get(e.roadId) ?? [0, 0];
+      r[0] += Math.min(1, a.v / e.speed);
+      r[1]++;
+      acc.set(e.roadId, r);
+    }
+    const ids: string[] = [];
+    const ratio: number[] = [];
+    for (const [id, [sum, n]] of acc) {
+      ids.push(id);
+      ratio.push(sum / n);
+    }
+    return { ids, ratio };
   }
 
   get signalNodes(): number[] {
@@ -489,6 +546,13 @@ export class Simulation {
 
     for (const a of this.agents) {
       if (a.done || isVehicle(a.kind)) continue;
+      const e = g.edges[a.path[a.pi]];
+      // Pedestrians cross with the parallel traffic phase: wait at the corner on red.
+      if (a.kind === 'pedestrian' && a.pi < a.path.length - 1 && a.s >= e.len - 0.5 && this.signalState(e) !== 'green') {
+        a.s = e.len - 0.5;
+        a.v = 0;
+        continue;
+      }
       a.v = a.vmax;
       a.s += a.v * dt;
       while (!a.done && a.s >= g.edges[a.path[a.pi]].len) {

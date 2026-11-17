@@ -121,3 +121,20 @@ test('2D plan view: pack data, select, build, undo, simulate', async ({ page }) 
   await page.waitForTimeout(1000);
   expect(errors).toEqual([]);
 });
+
+test('traffic layer and signals (Manhattan pack)', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByLabel('Traffic flow').check();
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: '20×' }).click();
+  await page.waitForTimeout(6000);
+  await page.screenshot({ path: 'test-results/11-traffic-3d.png' });
+  await page.getByRole('button', { name: '2D plan' }).click();
+  await page.getByRole('button', { name: 'District' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/12-traffic-2d.png' });
+  await page.getByRole('button', { name: '3D view' }).click();
+});

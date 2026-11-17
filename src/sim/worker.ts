@@ -2,10 +2,11 @@
 import type { WorldData } from '../geo/types';
 import type { RegionProfile } from './region';
 import { Simulation } from './simulation';
-import { encodeFrame, type ToWorker } from './protocol';
+import { encodeFrame, infoOf, type ToWorker } from './protocol';
 
 let sim: Simulation | null = null;
 let watched: number | null = null;
+let frames = 0;
 
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   try {
@@ -20,11 +21,11 @@ function handle(m: ToWorker) {
     sim = new Simulation(m.world as WorldData, m.region as RegionProfile, m.maxAgents, m.seed);
     sim.time = m.time;
     sim.step(0);
-    self.postMessage({ t: 'info', routes: sim.busRouteLines(), stops: sim.stopPositions() });
+    self.postMessage(infoOf(sim));
   } else if (!sim) return;
   else if (m.t === 'step') sim.step(m.dt);
   else if (m.t === 'time') sim.time = m.time;
   else if (m.t === 'watch') watched = m.id;
-  const frame = encodeFrame(sim, watched);
+  const frame = encodeFrame(sim, watched, frames++ % 15 === 0);
   self.postMessage(frame, [frame.buf.buffer]);
 }

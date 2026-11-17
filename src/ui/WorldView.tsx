@@ -53,7 +53,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [perf, setPerf] = useState<Perf | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [quality, setQuality] = useState<QualitySetting>(readQuality);
-  const [layers, setLayers] = useState<Layers>({ agents: true, transit: true, estimated: false });
+  const [layers, setLayers] = useState<Layers>({ agents: true, transit: true, estimated: false, traffic: false });
   const [running, setRunning] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
@@ -278,6 +278,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
 
       <div className="panel layers" role="group" aria-label="Layers">
         <label><input type="checkbox" checked={layers.agents} onChange={(e) => setLayers({ ...layers, agents: e.target.checked })} /> People & vehicles</label>
+        <label><input type="checkbox" checked={layers.traffic} onChange={(e) => setLayers({ ...layers, traffic: e.target.checked })} /> Traffic flow</label>
         <label><input type="checkbox" checked={layers.transit} onChange={(e) => setLayers({ ...layers, transit: e.target.checked })} /> Bus routes</label>
         <label><input type="checkbox" checked={layers.estimated} onChange={(e) => setLayers({ ...layers, estimated: e.target.checked })} /> Highlight estimated data</label>
       </div>
