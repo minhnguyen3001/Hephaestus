@@ -54,6 +54,38 @@ export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THR
     }
     u += len;
   }
+  // Small rectangular houses get a pitched (gable) roof along their long axis.
+  const gable = pitchedRoof(b, pts);
+  if (gable) {
+    const rc = new THREE.Color(hash01(b.id + 'r') < 0.5 ? 0x9c5a44 : 0x6b6f78).offsetHSL(0, 0, hash01(b.id) * 0.08 - 0.04);
+    const ridge = h + gable.rise;
+    const [a, bb, c, d] = gable.quad; // a-b and c-d are the long sides
+    const mid1: Vec2 = [(bb[0] + c[0]) / 2, (bb[1] + c[1]) / 2];
+    const mid2: Vec2 = [(d[0] + a[0]) / 2, (d[1] + a[1]) / 2];
+    const tri = (p1: [number, number, number], p2: [number, number, number], p3: [number, number, number], col: THREE.Color) => {
+      const n = new THREE.Vector3(...p2).sub(new THREE.Vector3(...p1)).cross(new THREE.Vector3(...p3).sub(new THREE.Vector3(...p1))).normalize();
+      if (n.y < -1e-6) [p2, p3] = [p3, p2];
+      const nn = new THREE.Vector3(...p2).sub(new THREE.Vector3(...p1)).cross(new THREE.Vector3(...p3).sub(new THREE.Vector3(...p1))).normalize();
+      for (const q of [p1, p2, p3]) {
+        pos.push(...q);
+        nrm.push(nn.x, nn.y, nn.z);
+        col3(col);
+        wall.push(0);
+        fac.push(0, 0);
+      }
+    };
+    const col3 = (c3: THREE.Color) => col.push(c3.r, c3.g, c3.b);
+    const P = (p: Vec2, y: number): [number, number, number] => [p[0], y, -p[1]];
+    // two slopes
+    tri(P(a, h), P(bb, h), P(mid1, ridge), rc);
+    tri(P(a, h), P(mid1, ridge), P(mid2, ridge), rc);
+    tri(P(c, h), P(d, h), P(mid2, ridge), rc);
+    tri(P(c, h), P(mid2, ridge), P(mid1, ridge), rc);
+    // gable ends (wall colour)
+    tri(P(bb, h), P(c, h), P(mid1, ridge), color);
+    tri(P(d, h), P(a, h), P(mid2, ridge), color);
+    return finish();
+  }
   const tris = THREE.ShapeUtils.triangulateShape(pts.map((p) => new THREE.Vector2(p[0], p[1])), []);
   for (const t of tris) {
     let [a, b2, c] = t.map((i) => pts[i]);
@@ -66,13 +98,31 @@ export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THR
       fac.push(0, 0);
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute('aWall', new THREE.Float32BufferAttribute(wall, 1));
-  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 2));
-  return g;
+  return finish();
+
+  function finish() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('aWall', new THREE.Float32BufferAttribute(wall, 1));
+    g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 2));
+    return g;
+  }
+}
+
+/** Gable roof for low, small, near-rectangular residential/unknown buildings. Returns quad ordered long-side first. */
+export function pitchedRoof(b: Building, pts: Vec2[]): { quad: [Vec2, Vec2, Vec2, Vec2]; rise: number } | null {
+  if (pts.length !== 4 || b.height > 14 || b.origin === 'proposed') return null;
+  if (b.use !== 'residential' && b.use !== 'unknown' && b.use !== 'religious') return null;
+  const L = (i: number) => Math.hypot(pts[(i + 1) % 4][0] - pts[i][0], pts[(i + 1) % 4][1] - pts[i][1]);
+  const area = Math.abs(signedArea(pts));
+  if (area > 450 || area < 25) return null;
+  // near-rectangular: area close to product of adjacent sides
+  if (Math.abs(area - L(0) * L(1)) / area > 0.15) return null;
+  const q = L(0) >= L(1) ? pts : [pts[1], pts[2], pts[3], pts[0]];
+  const short = Math.min(L(0), L(1));
+  return { quad: q as [Vec2, Vec2, Vec2, Vec2], rise: Math.min(4, short * 0.35) };
 }
 
 export type Height = number | ((p: Vec2) => number);

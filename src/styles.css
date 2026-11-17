@@ -248,3 +248,4 @@ select.scenario { max-width: 150px; }
 .dots i.done { background: var(--accent); }
 .dots i.now { background: rgba(63,211,195,0.5); }
 @media (max-width: 600px) { .tour { left: 8px; right: 8px; width: auto; top: 64px; } }
+@media (max-width: 600px) { .attribution { left: 8px; right: 8px; bottom: 1px; text-align: center; font-size: 10px; } }
