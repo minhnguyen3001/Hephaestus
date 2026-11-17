@@ -138,3 +138,27 @@ test('traffic layer and signals (Manhattan pack)', async ({ page }) => {
   await page.screenshot({ path: 'test-results/12-traffic-2d.png' });
   await page.getByRole('button', { name: '3D view' }).click();
 });
+
+test('draw a metro line and see riders', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Shibuya/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: '2D plan' }).click();
+  await page.getByRole('button', { name: 'Aerial' }).click();
+  await page.getByRole('button', { name: 'Transit line' }).click();
+  await page.getByRole('button', { name: 'Elevated metro' }).click();
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  for (const [fx, fy] of [[0.3, 0.35], [0.45, 0.5], [0.55, 0.55], [0.7, 0.68]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  await page.getByRole('button', { name: 'Finish line' }).click();
+  await expect(page.locator('.lines')).toContainText('Metro A');
+  await page.getByRole('button', { name: '20×' }).click();
+  await page.waitForTimeout(8000);
+  await page.screenshot({ path: 'test-results/13-metro-2d.png' });
+  await page.getByRole('button', { name: '3D view' }).click();
+  await page.getByRole('button', { name: 'District' }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/14-metro-3d.png' });
+  const text = await page.locator('.lines').innerText();
+  expect(text).toMatch(/Metro A/);
+});

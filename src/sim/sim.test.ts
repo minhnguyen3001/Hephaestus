@@ -185,6 +185,25 @@ describe('simulation', () => {
     for (const r of ratio) expect(r).toBeGreaterThanOrEqual(0), expect(r).toBeLessThanOrEqual(1);
   });
 
+  it('carries riders on user-drawn bus and metro lines', () => {
+    const base = gridFixture();
+    const world = applyEdits(base, [
+      { kind: 'addLine', line: { id: 'u-l-bus', name: 'Bus A', mode: 'bus', stops: [[-200, -200], [0, -200], [200, -200], [200, 0], [200, 200]], color: 0xe5484d } },
+      { kind: 'addLine', line: { id: 'u-l-metro', name: 'Metro B', mode: 'metro', stops: [[-200, 200], [0, 0], [200, -200]], color: 0x8e44ad } },
+    ]);
+    // Transit-heavy profile so plenty of trips consider the lines.
+    const region = { ...profileFor('us'), modeShare: { car: 0.1, taxi: 0, motorcycle: 0, bicycle: 0, bus: 0.8, walk: 0.1 } };
+    const sim = new Simulation(world, region, 200, 11);
+    const lines = () => sim.stats().lines.filter((l) => !l.generated);
+    expect(lines().map((l) => l.name)).toEqual(['Bus A', 'Metro B']);
+    sim.step(1800);
+    const [bus, metro] = lines();
+    expect(bus.vehicles).toBeGreaterThan(0);
+    expect(metro.vehicles).toBeGreaterThanOrEqual(2);
+    expect(bus.boardings + metro.boardings).toBeGreaterThan(5);
+    expect(sim.trainCars().some((c) => c.color === 0x8e44ad)).toBe(true);
+  });
+
   it('stops cars at red lights', () => {
     const w = gridFixture();
     const sim = new Simulation(w, profileFor('us'), 10, 3);

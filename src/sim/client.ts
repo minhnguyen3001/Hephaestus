@@ -1,7 +1,7 @@
 import type { Vec2, WorldData } from '../geo/types';
 import { decodeAgents, encodeFrame, infoOf, type AgentView, type Frame, type Info, type ToWorker } from './protocol';
 import type { RegionProfile } from './region';
-import { Simulation, type AgentInfo, type SignalHead, type SimStats, type TrainCar } from './simulation';
+import { Simulation, type AgentInfo, type SignalHead, type SimStats, type TrainCar, type TransitLineView } from './simulation';
 
 /**
  * Runs the simulation off the main thread (Web Worker) when possible, inline otherwise.
@@ -12,7 +12,7 @@ export class SimClient {
   agents: AgentView[] = [];
   trains: TrainCar[] = [];
   stats: SimStats | null = null;
-  info: { routes: Vec2[][]; stops: Vec2[]; signals: SignalHead[] } = { routes: [], stops: [], signals: [] };
+  info: { lines: TransitLineView[]; stops: Vec2[]; signals: SignalHead[] } = { lines: [], stops: [], signals: [] };
   /** Smoothed speed ratio per road id (1 = free flow), for the traffic layer. */
   roadSpeed = new Map<string, number>();
   private frameNo = 0;
@@ -67,7 +67,7 @@ export class SimClient {
 
   private receive(m: Frame | Info) {
     if (m.t === 'info') {
-      this.info = { routes: m.routes, stops: m.stops, signals: m.signals };
+      this.info = { lines: m.lines, stops: m.stops, signals: m.signals };
       this.onInfo?.();
       return;
     }

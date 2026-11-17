@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geo/types';
-import { AGENT_KINDS, type AgentInfo, type AgentKind, type SignalHead, type SimStats, type Simulation, type TrainCar } from './simulation';
+import { AGENT_KINDS, type AgentInfo, type AgentKind, type SignalHead, type SimStats, type Simulation, type TrainCar, type TransitLineView } from './simulation';
 
 export type ToWorker =
   | { t: 'init'; world: unknown; region: unknown; maxAgents: number; seed: number; time: number }
@@ -19,12 +19,12 @@ export interface Frame {
 
 export interface Info {
   t: 'info';
-  routes: Vec2[][];
+  lines: TransitLineView[];
   stops: Vec2[];
   signals: SignalHead[];
 }
 
-export const infoOf = (sim: Simulation): Info => ({ t: 'info', routes: sim.busRouteLines(), stops: sim.stopPositions(), signals: sim.signalApproaches() });
+export const infoOf = (sim: Simulation): Info => ({ t: 'info', lines: sim.transitLines(), stops: sim.stopPositions(), signals: sim.signalApproaches() });
 
 export interface AgentView {
   id: number;

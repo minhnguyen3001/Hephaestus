@@ -83,6 +83,15 @@ export interface Rail {
   tunnel: boolean;
 }
 
+/** A user-designed transit line. Bus lines run on streets; metro lines are new elevated guideways. */
+export interface TransitLineSpec {
+  id: string;
+  name: string;
+  mode: 'bus' | 'metro';
+  stops: Vec2[];
+  color: number;
+}
+
 export interface WorldData {
   center: LatLon;
   radius: number; // meters
@@ -94,6 +103,7 @@ export interface WorldData {
   fetchedAt: string;
   source: string;
   terrain?: Terrain; // undefined = flat (no DEM or loading failed)
+  transitLines?: TransitLineSpec[]; // proposed lines (real-world transit comes from rails / generated routes)
 }
 
 export interface Place {

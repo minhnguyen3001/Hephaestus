@@ -1,4 +1,4 @@
-import type { Building, Vec2, WorldData } from '../geo/types';
+import type { Building, TransitLineSpec, Vec2, WorldData } from '../geo/types';
 import { centroid, dist, hash01, makeSampler, polylineLength, rng, signedArea } from '../geo/util';
 import { LANE_WIDTH, RoadGraph, type GEdge } from './graph';
 import type { RegionProfile, TravelMode } from './region';
@@ -7,7 +7,7 @@ const CYCLE = 64;
 
 export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus';
 export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus'];
-export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to bus stop' | 'bus service';
+export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service';
 
 export interface Agent {
   id: number;
@@ -24,7 +24,9 @@ export interface Agent {
   stopped: number; // seconds stationary, for gridlock recovery
   from?: string;
   to?: string;
-  bus?: { route: number; dir: 0 | 1; load: number; cap: number; lastStop: number };
+  bus?: { line: number; dir: 0 | 1; riders: Rider[]; cap: number; lastStop: number };
+  rider?: Rider; // pedestrian walking to a stop to take transit
+  stopId?: number;
   done: boolean;
   // derived each step (local meters + unit heading)
   x: number;
@@ -45,9 +47,73 @@ interface Site {
   walkNode: number;
 }
 
-interface BusRoute {
-  paths: [number[], number[]];
-  stops: [Set<number>, Set<number>];
+/** A passenger heading for a stop on a specific line and direction. */
+interface Rider {
+  line: number;
+  dir: 0 | 1;
+  to: number; // stop id to alight at
+  destWalk: number;
+  destLabel: string;
+}
+
+interface Stop {
+  id: number;
+  p: Vec2;
+  walkNode: number;
+  waiting: Rider[];
+  lines: Set<number>;
+}
+
+interface Poly {
+  pts: Vec2[];
+  cum: number[];
+  len: number;
+}
+
+interface Line {
+  id: string;
+  name: string;
+  mode: 'bus' | 'metro';
+  color: number;
+  generated: boolean;
+  stopSeq: [number[], number[]]; // stop ids in travel order per direction
+  paths?: [number[], number[]]; // bus: edge paths per direction
+  stopAtPath?: [Map<number, number>, Map<number, number>]; // bus: path index (stop at edge end; -1 = start) → stop id
+  poly?: Poly; // metro guideway
+  stationS?: number[]; // metro: distance along poly of each stop in stopSeq[0]
+  boardings: number;
+}
+
+interface MetroTrain {
+  line: number;
+  s: number;
+  dir: 1 | -1;
+  next: number; // index into stationS of the station being approached
+  v: number;
+  dwell: number;
+  riders: Rider[];
+}
+
+export interface TransitLineView {
+  id: string;
+  name: string;
+  mode: 'bus' | 'metro';
+  color: number;
+  generated: boolean;
+  pts: Vec2[];
+  stops: Vec2[];
+}
+
+export interface LineStats {
+  id: string;
+  name: string;
+  mode: 'bus' | 'metro';
+  color: number;
+  generated: boolean;
+  boardings: number;
+  onboard: number;
+  waiting: number;
+  vehicles: number;
 }
 
 interface TrainLine {
@@ -75,6 +141,7 @@ export interface TrainCar {
   hy: number;
   elevated: boolean;
   carLen: number;
+  color?: number;
 }
 
 export interface SimStats {
@@ -84,8 +151,9 @@ export interface SimStats {
   tripsCompleted: number;
   avgVehicleSpeedKmh: number;
   congestion: number;
-  busRiders: number;
+  busRiders: number; // transit boardings
   waitingAtStops: number;
+  lines: LineStats[];
   residents: number;
   jobs: number;
   signals: number;
@@ -170,8 +238,10 @@ export class Simulation {
   private trains: Train[] = [];
   private lines: TrainLine[] = [];
   private sites: Site[] = [];
-  private routes: BusRoute[] = [];
-  private stops = new Map<number, { waiting: number }>();
+  private transit: Line[] = [];
+  private stops: Stop[] = [];
+  private stopByNode = new Map<number, number>();
+  private metros: MetroTrain[] = [];
   private signals = new Map<number, { axis: Vec2; offset: number }>();
   private rand: () => number;
   private nextId = 1;
@@ -188,6 +258,7 @@ export class Simulation {
     this.buildSites(world);
     this.buildSignals(new Set(world.signalNodes));
     this.buildBusRoutes(world.radius);
+    this.buildUserLines(world.transitLines ?? []);
     this.buildTrains(world);
   }
 
@@ -290,6 +361,35 @@ export class Simulation {
     return [...this.signals.keys()];
   }
 
+  private stopAtNode(node: number): number {
+    let id = this.stopByNode.get(node);
+    if (id === undefined) {
+      const p = this.graph.nodes[node].p;
+      id = this.stops.length;
+      this.stops.push({ id, p, walkNode: this.graph.nearestNode(p, 'walk'), waiting: [], lines: new Set() });
+      this.stopByNode.set(node, id);
+    }
+    return id;
+  }
+
+  private addBusLine(meta: Pick<Line, 'id' | 'name' | 'color' | 'generated'>, paths: [number[], number[]], stopAtPath: [Map<number, number>, Map<number, number>], perDir: number) {
+    const g = this.graph;
+    const order = (dir: 0 | 1) => [...stopAtPath[dir].entries()].sort((a, b) => a[0] - b[0]).map(([, id]) => id);
+    const li = this.transit.length;
+    this.transit.push({ ...meta, mode: 'bus', paths, stopAtPath, stopSeq: [order(0), order(1)], boardings: 0 });
+    for (const dir of [0, 1] as const) for (const id of stopAtPath[dir].values()) this.stops[id].lines.add(li);
+    for (const dir of [0, 1] as const) {
+      for (let k = 0; k < perDir; k++) {
+        const path = paths[dir];
+        const a = this.newAgent('bus', 'transit service', path);
+        a.pi = Math.floor(((k + 0.5) / perDir) * path.length * 0.9);
+        a.s = Math.min(g.edges[path[a.pi]].len, 1);
+        a.bus = { line: li, dir, riders: [], cap: 70, lastStop: -1 };
+        this.agents.push(a);
+      }
+    }
+  }
+
   private buildBusRoutes(radius: number) {
     const g = this.graph;
     const major = g.nodes
@@ -306,34 +406,73 @@ export class Simulation {
       if (a && b && a.length > 3 && b.length > 3) cands.push({ a, b, len: a.reduce((l, e) => l + g.edges[e].len, 0) });
     }
     cands.sort((x, y) => y.len - x.len);
-    for (const c of cands.slice(0, 3)) {
-      const stopsFor = (path: number[]) => {
-        const set = new Set<number>();
-        let acc = 0;
-        path.forEach((e, i) => {
-          acc += g.edges[e].len;
-          if (acc >= 320 && i < path.length - 1) {
-            set.add(i);
-            if (!this.stops.has(g.edges[e].to)) this.stops.set(g.edges[e].to, { waiting: 0 });
-            acc = 0;
+    const stopsFor = (path: number[]) => {
+      const m = new Map<number, number>();
+      let acc = 0;
+      path.forEach((e, i) => {
+        acc += g.edges[e].len;
+        if (acc >= 320 && i < path.length - 1) {
+          m.set(i, this.stopAtNode(g.edges[e].to));
+          acc = 0;
+        }
+      });
+      return m;
+    };
+    cands.slice(0, 3).forEach((c, n) => {
+      this.addBusLine(
+        { id: `gen-bus-${n}`, name: `Bus ${n + 1} (simulated)`, color: this.region.busColor, generated: true },
+        [c.a, c.b], [stopsFor(c.a), stopsFor(c.b)], this.maxAgents >= 600 ? 2 : 1,
+      );
+    });
+  }
+
+  /** Proposed lines drawn by the user. Bus lines follow streets between stops; metro lines are straight guideways. */
+  private buildUserLines(specs: TransitLineSpec[]) {
+    const g = this.graph;
+    for (const spec of specs) {
+      if (spec.stops.length < 2) continue;
+      if (spec.mode === 'bus') {
+        const nodes = spec.stops.map((p) => g.nearestNode(p, 'car')).filter((n, i, arr) => n >= 0 && n !== arr[i - 1]);
+        if (nodes.length < 2) continue;
+        const build = (seq: number[]): [number[], Map<number, number>] | null => {
+          const path: number[] = [];
+          const at = new Map<number, number>([[-1, this.stopAtNode(seq[0])]]);
+          for (let i = 1; i < seq.length; i++) {
+            const leg = g.route(seq[i - 1], seq[i], 'car');
+            if (!leg) return null;
+            path.push(...leg);
+            at.set(path.length - 1, this.stopAtNode(seq[i]));
           }
+          return path.length ? [path, at] : null;
+        };
+        const fwd = build(nodes);
+        const back = build([...nodes].reverse());
+        if (!fwd || !back) continue;
+        const len = fwd[0].reduce((l, e) => l + g.edges[e].len, 0);
+        this.addBusLine({ id: spec.id, name: spec.name, color: spec.color, generated: false }, [fwd[0], back[0]], [fwd[1], back[1]], Math.max(1, Math.round(len / 900)));
+      } else {
+        const pts = spec.stops;
+        const cum = [0];
+        for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+        const li = this.transit.length;
+        const ids = pts.map((p) => {
+          const id = this.stops.length;
+          this.stops.push({ id, p, walkNode: g.nearestNode(p, 'walk'), waiting: [], lines: new Set([li]) });
+          return id;
         });
-        return set;
-      };
-      this.routes.push({ paths: [c.a, c.b], stops: [stopsFor(c.a), stopsFor(c.b)] });
-    }
-    const perDir = this.maxAgents >= 600 ? 2 : 1;
-    this.routes.forEach((r, ri) => {
-      for (const dir of [0, 1] as const) {
-        for (let k = 0; k < perDir; k++) {
-          const path = r.paths[dir];
-          const a = this.newAgent('bus', 'bus service', path);
-          a.pi = Math.floor(((k + 0.5) / perDir) * path.length * 0.8);
-          a.bus = { route: ri, dir, load: Math.floor(this.rand() * 20), cap: 70, lastStop: -1 };
-          this.agents.push(a);
+        const poly = { pts, cum, len: cum[cum.length - 1] };
+        this.transit.push({
+          id: spec.id, name: spec.name, mode: 'metro', color: spec.color, generated: false,
+          stopSeq: [ids, [...ids].reverse()], poly, stationS: cum, boardings: 0,
+        });
+        const n = Math.max(2, Math.ceil(poly.len / 900));
+        for (let k = 0; k < n; k++) {
+          const dir: 1 | -1 = k % 2 ? -1 : 1;
+          const idx = Math.min(cum.length - 1, Math.floor((k / n) * cum.length));
+          this.metros.push({ line: li, s: cum[idx], dir, next: Math.max(0, Math.min(cum.length - 1, idx + dir)), v: 0, dwell: 5, riders: [] });
         }
       }
-    });
+    }
   }
 
   private buildTrains(world: WorldData) {
@@ -424,7 +563,7 @@ export class Simulation {
     const w = { ...this.region.modeShare };
     w.walk *= d < 400 ? 8 : d < 1000 ? 2 : d > 2500 ? 0.1 : 1;
     w.bicycle *= d < 300 ? 0.3 : 1;
-    if (!hasStops || d < 500) w.bus = 0;
+    if (!hasStops || d < 300) w.bus = 0;
     const total = Object.values(w).reduce((a, b) => a + b, 0);
     let x = this.rand() * total;
     for (const [m, v] of Object.entries(w)) {
@@ -434,24 +573,63 @@ export class Simulation {
     return 'walk';
   }
 
+  /** Best line, direction and stops for a trip, if transit beats walking (≤ 700 m walk at each end). */
+  private planTransit(o: Site, d: Site): { line: number; dir: 0 | 1; from: number; to: number } | null {
+    const MAX = 700;
+    let best: { line: number; dir: 0 | 1; from: number; to: number } | null = null;
+    let bestCost = dist(o.c, d.c) * 0.8; // must beat walking most of the way
+    for (const a of this.stops) {
+      const wa = dist(o.c, a.p);
+      if (wa > MAX) continue;
+      for (const li of a.lines) {
+        const line = this.transit[li];
+        for (const dir of [0, 1] as const) {
+          const seq = line.stopSeq[dir];
+          const i = seq.indexOf(a.id);
+          if (i < 0) continue;
+          for (let j = i + 1; j < seq.length; j++) {
+            const b = this.stops[seq[j]];
+            const wb = dist(b.p, d.c);
+            if (wb > MAX) continue;
+            const cost = wa + wb;
+            if (cost < bestCost) {
+              bestCost = cost;
+              best = { line: li, dir, from: a.id, to: b.id };
+            }
+          }
+        }
+      }
+    }
+    return best;
+  }
+
   /** Create one trip from the origin-destination model. Returns false if no route exists. */
   spawnTrip(): boolean {
     const { purpose, o, d } = this.pickPurpose();
     if (!o || !d || o === d) return false;
     const g = this.graph;
     const D = dist(o.c, d.c);
-    let mode: TravelMode | 'truck' = purpose === 'delivery' ? 'truck' : this.chooseMode(D, this.stops.size > 0);
+    let mode: TravelMode | 'truck' = purpose === 'delivery' ? 'truck' : this.chooseMode(D, this.stops.length > 0);
     let path: number[] | null = null;
     let kind: AgentKind;
     let p: Purpose = purpose;
     let to = d.label;
+    let rider: Rider | undefined;
+    let stopId: number | undefined;
     if (mode === 'bus') {
-      const stop = this.nearestStop(o.c);
-      if (stop >= 0 && dist(o.c, g.nodes[stop].p) < 900) {
-        path = g.route(o.walkNode, g.nearestNode(g.nodes[stop].p, 'walk'), 'walk');
-        p = 'to bus stop';
-        to = 'bus stop';
-      } else mode = 'walk';
+      const plan = this.planTransit(o, d);
+      if (plan) {
+        rider = { line: plan.line, dir: plan.dir, to: plan.to, destWalk: d.walkNode, destLabel: d.label };
+        stopId = plan.from;
+        const stop = this.stops[plan.from];
+        path = g.route(o.walkNode, stop.walkNode, 'walk');
+        if (path && path.length === 0) {
+          stop.waiting.push(rider); // already at the stop
+          return true;
+        }
+        p = 'to transit stop';
+        to = `${this.transit[plan.line].name} stop`;
+      } else mode = D < 1500 ? 'walk' : 'car';
     }
     if (mode === 'walk' || (mode === 'bus' && !path)) {
       kind = 'pedestrian';
@@ -470,6 +648,8 @@ export class Simulation {
     const a = this.newAgent(kind, p, path);
     a.from = o.label;
     a.to = to;
+    a.rider = rider;
+    a.stopId = stopId;
     if (!this.filled) {
       a.pi = Math.floor(this.rand() * path.length);
       a.s = this.rand() * g.edges[path[a.pi]].len;
@@ -477,19 +657,6 @@ export class Simulation {
     }
     this.agents.push(a);
     return true;
-  }
-
-  private nearestStop(p: Vec2): number {
-    let best = -1;
-    let bd = Infinity;
-    for (const n of this.stops.keys()) {
-      const d = dist(p, this.graph.nodes[n].p);
-      if (d < bd) {
-        bd = d;
-        best = n;
-      }
-    }
-    return best;
   }
 
   // ---------- stepping ----------
@@ -562,6 +729,7 @@ export class Simulation {
     }
 
     for (const t of this.trains) this.moveTrain(t, dt);
+    for (const t of this.metros) this.moveMetro(t, dt);
 
     if (this.agents.some((a) => a.done)) this.agents = this.agents.filter((a) => !a.done);
   }
@@ -586,7 +754,8 @@ export class Simulation {
       if (t !== undefined) gap = toEnd + t;
     }
     // Bus stop: pull in at the end of a stop edge.
-    if (a.bus && a.bus.lastStop !== a.pi && this.routes[a.bus.route].stops[a.bus.dir].has(a.pi)) gap = Math.min(gap, toEnd + 1.5);
+    const stopHere = a.bus && a.bus.lastStop !== a.pi ? this.transit[a.bus.line].stopAtPath![a.bus.dir].get(a.pi) : undefined;
+    if (stopHere !== undefined) gap = Math.min(gap, toEnd + 1.5);
 
     const spec = VEHICLE[a.kind as keyof typeof VEHICLE];
     const vDesired = e.speed * a.vmax;
@@ -602,17 +771,9 @@ export class Simulation {
       return;
     }
 
-    if (a.bus && a.s >= e.len - 0.3 && a.bus.lastStop !== a.pi && this.routes[a.bus.route].stops[a.bus.dir].has(a.pi)) {
-      const stop = this.stops.get(e.to);
-      const b = a.bus;
-      const alight = Math.round(b.load * (0.15 + this.rand() * 0.25));
-      b.load -= alight;
-      const board = Math.min(stop?.waiting ?? 0, b.cap - b.load);
-      if (stop) stop.waiting -= board;
-      b.load += board;
-      this.busRiders += board;
-      b.lastStop = a.pi;
-      a.dwell = 8 + (alight + board) * 1.2;
+    if (a.bus && stopHere !== undefined && a.s >= e.len - 0.3) {
+      a.bus.lastStop = a.pi;
+      a.dwell = this.serveStop(a.bus.riders, a.bus.cap, a.bus.line, a.bus.dir, stopHere);
       a.s = Math.min(a.s, e.len);
       return;
     }
@@ -622,13 +783,14 @@ export class Simulation {
       a.pi++;
       if (a.pi >= a.path.length) {
         if (a.bus) {
+          const line = this.transit[a.bus.line];
           a.bus.dir = a.bus.dir === 0 ? 1 : 0;
-          a.path = this.routes[a.bus.route].paths[a.bus.dir];
+          a.path = line.paths![a.bus.dir];
           a.pi = 0;
           a.s = 0;
           a.bus.lastStop = -1;
-          a.bus.load = 0;
-          a.dwell = 20;
+          const first = line.stopAtPath![a.bus.dir].get(-1);
+          a.dwell = first !== undefined ? this.serveStop(a.bus.riders, a.bus.cap, a.bus.line, a.bus.dir, first) + 10 : 20;
         } else this.arrive(a);
       }
     }
@@ -636,11 +798,72 @@ export class Simulation {
 
   private arrive(a: Agent) {
     a.done = true;
-    this.tripsCompleted++;
-    if (a.purpose === 'to bus stop') {
-      const node = this.graph.edges[a.path[a.path.length - 1]].to;
-      const stop = this.stops.get(this.graph.nearestNode(this.graph.nodes[node].p, 'car')) ?? this.stops.get(node);
-      if (stop) stop.waiting++;
+    if (a.rider && a.stopId !== undefined) this.stops[a.stopId].waiting.push(a.rider);
+    else this.tripsCompleted++;
+  }
+
+  /** Alight riders for this stop (they walk on), board waiting riders for this line and direction. Returns dwell seconds. */
+  private serveStop(riders: Rider[], cap: number, line: number, dir: 0 | 1, stopId: number): number {
+    const stop = this.stops[stopId];
+    let alight = 0;
+    for (let i = riders.length - 1; i >= 0; i--) {
+      if (riders[i].to !== stopId) continue;
+      this.egress(riders[i], stop);
+      riders.splice(i, 1);
+      alight++;
+    }
+    let board = 0;
+    for (let i = 0; i < stop.waiting.length && riders.length < cap; ) {
+      const r = stop.waiting[i];
+      if (r.line === line && r.dir === dir) {
+        riders.push(r);
+        stop.waiting.splice(i, 1);
+        board++;
+      } else i++;
+    }
+    this.busRiders += board;
+    this.transit[line].boardings += board;
+    return 6 + (alight + board) * 1.2;
+  }
+
+  private egress(r: Rider, stop: Stop) {
+    const path = this.graph.route(stop.walkNode, r.destWalk, 'walk');
+    if (!path || !path.length) {
+      this.tripsCompleted++;
+      return;
+    }
+    const a = this.newAgent('pedestrian', 'from transit stop', path);
+    a.from = 'transit stop';
+    a.to = r.destLabel;
+    this.agents.push(a);
+  }
+
+  private moveMetro(t: MetroTrain, dt: number) {
+    const line = this.transit[t.line];
+    const st = line.stationS!;
+    if (t.dwell > 0) {
+      t.dwell -= dt;
+      return;
+    }
+    const target = st[t.next];
+    const remaining = Math.abs(target - t.s);
+    t.v = Math.min(22, t.v + 1 * dt, Math.sqrt(2 * 1 * Math.max(0, remaining - 0.3)) + 0.3);
+    t.s += t.dir * Math.min(remaining, t.v * dt);
+    if (Math.abs(target - t.s) < 0.05) {
+      t.s = target;
+      t.v = 0;
+      const seqDir: 0 | 1 = t.dir > 0 ? 0 : 1;
+      const stopId = line.stopSeq[0][t.next];
+      t.dwell = Math.max(18, this.serveStop(t.riders, 600, t.line, seqDir, stopId));
+      if (t.next + t.dir < 0 || t.next + t.dir >= st.length) {
+        t.dir = t.dir > 0 ? -1 : 1;
+        // terminal: everyone else gets off, then the train turns back
+        for (const r of t.riders.splice(0)) this.egress(r, this.stops[stopId]);
+        t.dwell = Math.max(t.dwell, 30);
+        // board riders for the new direction
+        this.serveStop(t.riders, 600, t.line, t.dir > 0 ? 0 : 1, stopId);
+      }
+      t.next += t.dir;
     }
   }
 
@@ -690,8 +913,26 @@ export class Simulation {
     }
   }
 
+  private along(poly: Poly, s: number, dir: number) {
+    let k = 1;
+    while (k < poly.cum.length - 1 && poly.cum[k] < s) k++;
+    const a = poly.pts[k - 1];
+    const b = poly.pts[k];
+    const segLen = poly.cum[k] - poly.cum[k - 1] || 1;
+    const f = (s - poly.cum[k - 1]) / segLen;
+    return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, hx: ((b[0] - a[0]) / segLen) * dir, hy: ((b[1] - a[1]) / segLen) * dir };
+  }
+
   trainCars(): TrainCar[] {
     const out: TrainCar[] = [];
+    for (const t of this.metros) {
+      const line = this.transit[t.line];
+      const poly = line.poly!;
+      for (let i = 0; i < 3; i++) {
+        const s = Math.min(poly.len, Math.max(0, t.s - t.dir * (i * 17 + 8)));
+        out.push({ ...this.along(poly, s, t.dir), elevated: true, carLen: 16, color: line.color });
+      }
+    }
     for (const t of this.trains) {
       const line = this.lines[t.line];
       for (let i = 0; i < t.cars; i++) {
@@ -730,7 +971,7 @@ export class Simulation {
       }
     }
     let waiting = 0;
-    for (const s of this.stops.values()) waiting += s.waiting;
+    for (const s of this.stops) waiting += s.waiting.length;
     return {
       time: this.time,
       active,
@@ -740,10 +981,11 @@ export class Simulation {
       congestion: vN ? slow / vN : 0,
       busRiders: this.busRiders,
       waitingAtStops: waiting,
+      lines: this.lineStats(),
       residents: Math.round(this.totals.residents),
       jobs: Math.round(this.totals.jobs),
       signals: this.signals.size,
-      busRoutes: this.routes.length,
+      busRoutes: this.transit.length,
       rerouted: this.rerouted,
     };
   }
@@ -754,16 +996,39 @@ export class Simulation {
     return {
       id: a.id, kind: a.kind, purpose: a.purpose, from: a.from, to: a.to,
       speedKmh: (a.kind === 'pedestrian' || a.kind === 'bicycle' ? a.vmax : a.v) * 3.6,
-      load: a.bus?.load, cap: a.bus?.cap,
+      load: a.bus?.riders.length, cap: a.bus?.cap,
     };
   }
 
-  /** Bus route polylines (local coords) for rendering. */
-  busRouteLines(): Vec2[][] {
-    return this.routes.map((r) => [this.graph.nodes[this.graph.edges[r.paths[0][0]].from].p, ...r.paths[0].map((e) => this.graph.nodes[this.graph.edges[e].to].p)]);
+  lineStats(): LineStats[] {
+    return this.transit.map((l, li) => {
+      let onboard = 0;
+      let vehicles = 0;
+      for (const a of this.agents) if (a.bus?.line === li) {
+        onboard += a.bus.riders.length;
+        vehicles++;
+      }
+      for (const t of this.metros) if (t.line === li) {
+        onboard += t.riders.length;
+        vehicles++;
+      }
+      let waiting = 0;
+      for (const s of this.stops) for (const r of s.waiting) if (r.line === li) waiting++;
+      return { id: l.id, name: l.name, mode: l.mode, color: l.color, generated: l.generated, boardings: l.boardings, onboard, waiting, vehicles };
+    });
+  }
+
+  /** Transit lines for rendering. */
+  transitLines(): TransitLineView[] {
+    const g = this.graph;
+    return this.transit.map((l) => ({
+      id: l.id, name: l.name, mode: l.mode, color: l.color, generated: l.generated,
+      pts: l.poly ? l.poly.pts : [g.nodes[g.edges[l.paths![0][0]].from].p, ...l.paths![0].map((e) => g.nodes[g.edges[e].to].p)],
+      stops: l.stopSeq[0].map((id) => this.stops[id].p),
+    }));
   }
 
   stopPositions(): Vec2[] {
-    return [...this.stops.keys()].map((n) => this.graph.nodes[n].p);
+    return this.stops.map((s) => s.p);
   }
 }

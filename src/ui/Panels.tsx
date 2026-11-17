@@ -145,7 +145,7 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number }) {
+export function Dashboard({ stats, proposed, original, region, editCount, onRemoveLine }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; onRemoveLine?: (id: string) => void }) {
   const delta = (a: number, b: number, digits = 0) => {
     const d = a - b;
     if (Math.abs(d) < 10 ** -digits / 2) return null;
@@ -173,7 +173,7 @@ export function Dashboard({ stats, proposed, original, region, editCount }: { st
             <Metric label="Avg. vehicle speed" value={`${stats.avgVehicleSpeedKmh.toFixed(0)} km/h`} />
             <Metric label="Congested vehicles" value={`${Math.round(stats.congestion * 100)}%`} warn={stats.congestion > 0.4} />
             <Metric label="Trips completed" value={fmt(stats.tripsCompleted)} />
-            <Metric label="Bus boardings" value={fmt(stats.busRiders)} />
+            <Metric label="Transit boardings" value={fmt(stats.busRiders)} />
             <Metric label="Waiting at stops" value={fmt(stats.waitingAtStops)} />
           </div>
           <div className="kinds">
@@ -182,7 +182,19 @@ export function Dashboard({ stats, proposed, original, region, editCount }: { st
             ))}
             <span>Train cars <b>{stats.trains}</b></span>
           </div>
-          <p className="note">{stats.signals} traffic signals · {stats.busRoutes} simulated bus routes</p>
+          <p className="note">{stats.signals} traffic signals · {stats.busRoutes} transit lines</p>
+          <h4>Transit ridership</h4>
+          <ul className="lines">
+            {stats.lines.map((l) => (
+              <li key={l.id}>
+                <i style={{ background: `#${l.color.toString(16).padStart(6, '0')}` }} />
+                <span className="lname">{l.name}<small>{l.mode === 'metro' ? 'metro' : 'bus'} · {l.vehicles} vehicle{l.vehicles === 1 ? '' : 's'}</small></span>
+                <span title="Boardings so far / riding now / waiting">{fmt(l.boardings)} <small>boarded</small><br />{l.onboard} <small>on board</small> · {l.waiting} <small>waiting</small></span>
+                {!l.generated && onRemoveLine && <button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => onRemoveLine(l.id)}>✕</button>}
+              </li>
+            ))}
+          </ul>
+          {!stats.lines.some((l) => !l.generated) && <p className="note">Draw your own bus or metro line with the Transit tool (5).</p>}
         </>
       ) : <p className="note">Starting…</p>}
       <h4>Travel assumptions · {region.label}</h4>

@@ -18,6 +18,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'build', label: 'Place building', key: '2', icon: '▦' },
   { id: 'road', label: 'Draw road', key: '3', icon: '⟋' },
   { id: 'bulldoze', label: 'Bulldoze', key: '4', icon: '✕' },
+  { id: 'transit', label: 'Transit line', key: '5', icon: '⇆' },
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
@@ -56,6 +57,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [layers, setLayers] = useState<Layers>({ agents: true, transit: true, estimated: false, traffic: false });
   const [running, setRunning] = useState(true);
   const [speed, setSpeed] = useState(1);
+  const [lineMode, setLineMode] = useState<'bus' | 'metro'>('bus');
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [onboard, setOnboard] = useState(() => {
@@ -128,6 +130,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     engine.current?.setTool(view === 'original' ? 'select' : tool);
   }, [tool, view, quality, mode]);
   useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
+  useEffect(() => engine.current?.setLineMode(lineMode), [lineMode, quality, mode]);
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
@@ -302,7 +305,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} />
+        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}
 
       <SimBar
@@ -314,6 +317,17 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         }}
         onReset={() => engine.current?.resetSim()}
       />
+
+      {tool === 'transit' && editable && (
+        <div className="panel linebar" role="group" aria-label="New transit line">
+          <div className="seg">
+            <button className={lineMode === 'bus' ? 'on' : ''} onClick={() => setLineMode('bus')}>Bus</button>
+            <button className={lineMode === 'metro' ? 'on' : ''} onClick={() => setLineMode('metro')}>Elevated metro</button>
+          </div>
+          <button className="primary" onClick={() => engine.current?.finishLine()}>Finish line</button>
+          <button className="ghost" onClick={() => setTool('select')}>Done</button>
+        </div>
+      )}
 
       {hint && <div className="hint" role="status">{hint}<button className="icon-btn" onClick={() => setHint(null)} aria-label="Dismiss">✕</button></div>}
 

@@ -48,6 +48,8 @@ export interface WorldRenderer {
   setCameraMode(mode: CameraMode): void;
   focusSelected(): void;
   orbitStep(radians: number): void;
+  finishLine(): void;
+  setLineMode(m: 'bus' | 'metro'): void;
   dispose(): void;
 }
 
@@ -101,6 +103,8 @@ export class Engine implements WorldRenderer {
   private roads?: PickMesh;
   private ground?: THREE.Mesh;
   private transitGroup = new THREE.Group();
+  private metroGroup = new THREE.Group();
+  private draftGroup = new THREE.Group();
   private agentMeshes = {} as Record<AgentKind, THREE.InstancedMesh>;
   private agentSlots = {} as Record<AgentKind, AgentView[]>;
   private trainMesh: THREE.InstancedMesh;
@@ -122,6 +126,7 @@ export class Engine implements WorldRenderer {
     follow: (id) => this.follow(id),
     preselect: (sel) => (this.selected = sel),
     clearPreview: () => this.clearRoadPreview(),
+    drawDraft: () => this.drawDraft(),
   });
   private selected: { type: 'building' | 'road' | 'agent'; id: string | number } | null = null;
   private followId: number | null = null;
@@ -181,7 +186,7 @@ export class Engine implements WorldRenderer {
     });
 
     this.buildingMat = this.makeBuildingMaterial();
-    this.scene.add(this.hemi, this.sun, this.sun.target, this.worldGroup, this.transitGroup);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.worldGroup, this.transitGroup, this.metroGroup, this.draftGroup);
     this.sun.castShadow = preset.shadows;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.6;
@@ -200,7 +205,8 @@ export class Engine implements WorldRenderer {
       this.agentSlots[k] = [];
       this.scene.add(m);
     }
-    this.trainMesh = new THREE.InstancedMesh(agentGeometry('train'), new THREE.MeshStandardMaterial({ color: 0xc9ced6, roughness: 0.35, metalness: 0.5 }), 200);
+    this.trainMesh = new THREE.InstancedMesh(agentGeometry('train'), new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.5 }), 200);
+    this.trainMesh.setColorAt(0, new THREE.Color());
     this.trainMesh.count = 0;
     this.trainMesh.frustumCulled = false;
     this.trainMesh.castShadow = preset.shadows;
@@ -224,7 +230,7 @@ export class Engine implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => r.id).join('|') + region.id;
+    const sig = world.roads.map((r) => r.id).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
     if (!this.sim || sig !== this.roadSignature || region !== this.region) {
       this.startSim(world, region, 1);
       this.roadSignature = sig;
@@ -517,19 +523,86 @@ export class Engine implements WorldRenderer {
 
   private buildTransit() {
     this.clearGroup(this.transitGroup);
-    if (!this.sim || !this.region) return;
-    const color = new THREE.Color(this.region.busColor);
-    const geoms = this.sim.info.routes.map((l) => ribbonGeometry(l, 1.1, (p) => this.hp(p) + this.lift + 0.16, color)).filter((g): g is THREE.BufferGeometry => !!g);
-    if (geoms.length) {
-      this.transitGroup.add(new THREE.Mesh(mergeGeometries(geoms)!, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false })));
-    }
+    this.clearGroup(this.metroGroup);
     this.buildSignals();
+    if (!this.sim || !this.region) return;
+    const routes: THREE.BufferGeometry[] = [];
+    const decks: THREE.BufferGeometry[] = [];
+    const pillars: THREE.Vector3[] = [];
+    const platforms: THREE.Matrix4[] = [];
+    const DECK = 8;
+    for (const l of this.sim.info.lines) {
+      const color = new THREE.Color(l.color);
+      if (l.mode === 'bus') {
+        const g = ribbonGeometry(l.pts, l.generated ? 1.1 : 1.8, (p) => this.hp(p) + this.lift + 0.16, color);
+        if (g) routes.push(g);
+        continue;
+      }
+      // Proposed metro: an elevated guideway with a coloured stripe, pillars and station platforms.
+      const deck = ribbonGeometry(l.pts, 4.2, (p) => this.hp(p) + DECK, new THREE.Color(0xa3a8b0));
+      const stripe = ribbonGeometry(l.pts, 1.2, (p) => this.hp(p) + DECK + 0.06, color);
+      if (deck) decks.push(deck);
+      if (stripe) decks.push(stripe);
+      for (let i = 1; i < l.pts.length; i++) {
+        const [a, b] = [l.pts[i - 1], l.pts[i]];
+        const n = Math.max(1, Math.floor(dist(a, b) / 30));
+        for (let k = 0; k <= n; k++) pillars.push(v3([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]));
+      }
+      l.stops.forEach((p, i) => {
+        const q = l.stops[i + 1] ?? l.stops[i - 1];
+        const ang = Math.atan2(q[0] - p[0], -(q[1] - p[1]));
+        platforms.push(new THREE.Matrix4().makeRotationY(ang).setPosition(p[0], this.hp(p) + DECK - 0.6, -p[1]));
+      });
+    }
+    if (routes.length) {
+      this.transitGroup.add(new THREE.Mesh(mergeGeometries(routes)!, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false })));
+    }
+    const shadows = PRESETS[this.quality].shadows;
+    if (decks.length) {
+      const m = new THREE.Mesh(mergeGeometries(decks)!, this.flatMat);
+      m.castShadow = shadows;
+      this.metroGroup.add(m);
+    }
+    if (pillars.length) {
+      const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x9a958d }), pillars.length);
+      pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1.4, DECK, 1.4).setPosition(p.setY(this.h(p.x, -p.z)))));
+      pm.castShadow = shadows;
+      this.metroGroup.add(pm);
+    }
+    if (platforms.length) {
+      const pl = new THREE.InstancedMesh(new THREE.BoxGeometry(9, 1.2, 40), new THREE.MeshStandardMaterial({ color: 0xd8dde3 }), platforms.length);
+      platforms.forEach((m, i) => pl.setMatrixAt(i, m));
+      this.metroGroup.add(pl);
+    }
     const stops = this.sim.info.stops;
     if (stops.length) {
       const m = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.6, 0.6, 3.2, 8).translate(0, 1.6, 0), new THREE.MeshStandardMaterial({ color: this.region.busColor, emissive: this.region.busColor, emissiveIntensity: 0.25 }), stops.length);
       stops.forEach((p, i) => m.setMatrixAt(i, this.tmpM.makeTranslation(p[0] + 3, this.h(p[0] + 3, p[1] + 3), -p[1] - 3)));
       this.transitGroup.add(m);
     }
+  }
+
+  private drawDraft() {
+    this.clearGroup(this.draftGroup);
+    const d = this.tools.draft;
+    if (!d.length) return;
+    const y = (p: Vec2) => this.hp(p) + (this.tools.lineMode === 'metro' ? 8.2 : 1);
+    const color = this.tools.lineMode === 'metro' ? 0x8e44ad : 0x3fd3c3;
+    if (d.length > 1) this.draftGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(d.map((p) => v3(p, y(p)))), new THREE.LineBasicMaterial({ color, depthTest: false })));
+    for (const p of d) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      m.position.copy(v3(p, y(p)));
+      this.draftGroup.add(m);
+    }
+  }
+
+  finishLine() {
+    this.tools.finishLine(this.world);
+  }
+
+  setLineMode(m: 'bus' | 'metro') {
+    this.tools.lineMode = m;
+    this.drawDraft();
   }
 
   private buildSignals() {
@@ -673,9 +746,11 @@ export class Engine implements WorldRenderer {
     cars.forEach((c, i) => {
       if (i >= 200) return;
       s.set(1, 1, c.carLen);
-      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
+      this.tmpM.makeRotationY(Math.atan2(c.hx, -c.hy)).scale(s).setPosition(c.x, this.h(c.x, c.y) + (c.color !== undefined ? 8.15 : c.elevated ? 7.2 : 0.15 + this.lift), -c.y);
       this.trainMesh.setMatrixAt(i, this.tmpM);
+      this.trainMesh.setColorAt(i, this.tmpC.setHex(c.color ?? 0xc9ced6));
     });
+    if (this.trainMesh.instanceColor) this.trainMesh.instanceColor.needsUpdate = true;
     this.trainMesh.count = Math.min(200, cars.length);
     this.trainMesh.instanceMatrix.needsUpdate = true;
 
@@ -894,6 +969,7 @@ export class Engine implements WorldRenderer {
       return;
     }
     if (k === 'f' && e.shiftKey) return this.focusSelected();
+    if (k === 'enter' && this.tools.tool === 'transit') return this.finishLine();
     if (['w', 'a', 's', 'd', 'q', 'e', 'r', 'f', '=', '+', '-', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
       this.keys.add(k);
       this.tween = undefined;

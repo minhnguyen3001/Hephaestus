@@ -209,3 +209,12 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .dash-toggle { right: 8px; bottom: 182px; }
   .dashboard { left: 8px; right: 8px; bottom: 224px; }
 }
+
+.linebar { left: 50%; transform: translateX(-50%); top: 150px; display: flex; gap: 8px; padding: 6px; z-index: 7; align-items: center; }
+.linebar .primary { background: var(--accent); color: var(--accent-ink); border: none; font-weight: 600; }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lines li { display: grid; grid-template-columns: 10px 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 6px 8px; }
+.lines i { width: 10px; height: 10px; border-radius: 3px; }
+.lines .lname { display: flex; flex-direction: column; }
+.lines small { color: var(--muted); font-size: 11px; }
+@media (max-width: 600px) { .linebar { top: auto; bottom: 236px; } }

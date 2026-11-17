@@ -1,4 +1,4 @@
-import type { Building, BuildingUse, Road, Vec2, WorldData } from '../geo/types';
+import type { Building, BuildingUse, Road, TransitLineSpec, Vec2, WorldData } from '../geo/types';
 
 /**
  * A scenario is the immutable real-world base plus an ordered list of edits.
@@ -10,12 +10,15 @@ export type Edit =
   | { kind: 'demolish'; id: string }
   | { kind: 'addBuilding'; building: Building }
   | { kind: 'addRoad'; road: Road }
-  | { kind: 'removeRoad'; id: string };
+  | { kind: 'removeRoad'; id: string }
+  | { kind: 'addLine'; line: TransitLineSpec }
+  | { kind: 'removeLine'; id: string };
 
 export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
   if (edits.length === 0) return base;
   const buildings = new Map(base.buildings.map((b) => [b.id, b]));
   const roads = new Map(base.roads.map((r) => [r.id, r]));
+  const lines = new Map((base.transitLines ?? []).map((l) => [l.id, l]));
   for (const e of edits) {
     switch (e.kind) {
       case 'setHeight': {
@@ -40,9 +43,15 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
       case 'removeRoad':
         roads.delete(e.id);
         break;
+      case 'addLine':
+        lines.set(e.line.id, e.line);
+        break;
+      case 'removeLine':
+        lines.delete(e.id);
+        break;
     }
   }
-  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()] };
+  return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()] };
 }
 
 export interface History {
@@ -66,6 +75,8 @@ export function describeEdit(e: Edit): string {
     case 'addBuilding': return 'New building';
     case 'addRoad': return 'New road';
     case 'removeRoad': return 'Remove road';
+    case 'addLine': return `New ${e.line.mode} line`;
+    case 'removeLine': return 'Remove transit line';
   }
 }
 

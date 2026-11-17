@@ -67,6 +67,7 @@ export class Plan2D implements WorldRenderer {
     follow: (id) => this.follow(id),
     preselect: (sel) => (this.selected = sel),
     clearPreview: () => (this.hover = undefined),
+    drawDraft: () => undefined, // drawn every frame
   });
 
   constructor(private container: HTMLElement, private cb: EngineCallbacks) {
@@ -93,7 +94,7 @@ export class Plan2D implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => r.id).join('|') + region.id;
+    const sig = world.roads.map((r) => r.id).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
     if (!this.sim || sig !== this.roadSig || region !== this.region) this.startSim(world, region, 1);
     this.roadSig = sig;
     this.region = region;
@@ -157,6 +158,14 @@ export class Plan2D implements WorldRenderer {
 
   orbitStep() {
     /* north-up plan view */
+  }
+
+  finishLine() {
+    this.tools.finishLine(this.world);
+  }
+
+  setLineMode(m: 'bus' | 'metro') {
+    this.tools.lineMode = m;
   }
 
   dispose() {
@@ -356,10 +365,12 @@ export class Plan2D implements WorldRenderer {
         for (const f of this.fills) ctx.stroke(f.path);
       }
       if (this.layers.transit && this.sim && this.region) {
-        ctx.strokeStyle = hex(this.region.busColor);
-        ctx.globalAlpha = 0.55;
-        ctx.lineWidth = Math.max(1.2, 2 * px);
-        for (const l of this.sim.info.routes) ctx.stroke(this.linePath(l));
+        ctx.globalAlpha = 0.6;
+        for (const l of this.sim.info.lines) {
+          ctx.strokeStyle = hex(l.color);
+          ctx.lineWidth = l.mode === 'metro' ? Math.max(4, 3 * px) : Math.max(l.generated ? 1.2 : 2, 2 * px);
+          ctx.stroke(this.linePath(l.pts));
+        }
         ctx.globalAlpha = 1;
         ctx.fillStyle = hex(this.region.busColor);
         for (const [x, y] of this.sim.info.stops) ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
@@ -375,6 +386,18 @@ export class Plan2D implements WorldRenderer {
       }
       this.drawSelection(px);
       if (this.layers.agents && this.sim) this.drawAgents(px);
+      const d = this.tools.draft;
+      if (d.length) {
+        ctx.strokeStyle = this.tools.lineMode === 'metro' ? '#8e44ad' : hex(PROPOSED_COLOR);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.lineWidth = Math.max(3, 2 * px);
+        ctx.stroke(this.linePath(d));
+        for (const [x, y] of d) {
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(3, 5 * px), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       if (this.tools.roadStart && this.hover) {
         ctx.strokeStyle = hex(PROPOSED_COLOR);
         ctx.lineWidth = Math.max(6.4, 2 * px);
@@ -532,6 +555,7 @@ export class Plan2D implements WorldRenderer {
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     if (e.metaKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
+    if (k === 'enter' && this.tools.tool === 'transit') return this.finishLine();
     if (k === 'escape') {
       this.tools.cancel();
       this.select(null);
