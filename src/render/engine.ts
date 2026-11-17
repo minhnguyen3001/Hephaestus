@@ -11,7 +11,7 @@ import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
 import type { AgentView } from '../sim/protocol';
-import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type DayType, type SimStats, type Weather } from '../sim/simulation';
+import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type CityEvent, type SimParams, type SimStats, type Weather } from '../sim/simulation';
 
 export type { AgentInfo };
 import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
@@ -58,7 +58,7 @@ export interface WorldRenderer {
   setLineMode(m: 'bus' | 'metro'): void;
   getView(): SavedView;
   setView(v: SavedView): void;
-  setSimParams(day: DayType, demandScale: number, weather: Weather): void;
+  setSimParams(p: SimParams): void;
   lookAt(p: Vec2): void;
   roadSpeeds(): Map<string, number>;
   dispose(): void;
@@ -70,6 +70,7 @@ export interface EngineCallbacks {
   onStats(s: SimStats): void;
   onPerf(p: Perf): void;
   onHint(msg: string | null): void;
+  onPlaceEvent?(p: Vec2): void;
 }
 
 export interface Layers {
@@ -176,6 +177,7 @@ export class Engine implements WorldRenderer {
     preselect: (sel) => (this.selected = sel),
     clearPreview: () => this.clearRoadPreview(),
     drawDraft: () => this.drawDraft(),
+    placeEvent: (p) => this.cb.onPlaceEvent?.(p),
   });
   private selected: { type: 'building' | 'road' | 'agent'; id: string | number } | null = null;
   private followId: number | null = null;
@@ -365,7 +367,7 @@ export class Engine implements WorldRenderer {
     const time = this.sim?.time ?? 7.5 * 3600;
     this.sim?.dispose();
     this.sim = new SimClient(world, region, PRESETS[this.quality].maxAgents, seed, time);
-    this.sim.setParams(...this.simParams);
+    this.sim.setParams(this.simParams);
     this.sim.onInfo = () => this.buildTransit();
     this.buildTransit();
   }
@@ -783,8 +785,18 @@ export class Engine implements WorldRenderer {
     return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
-  private simParams: [DayType, number, Weather] = ['weekday', 1, 'clear'];
+  private simParams: SimParams = { day: 'weekday', demandScale: 1, weather: 'clear', events: [] };
   private weather: Weather = 'clear';
+  private eventGroup = new THREE.Group();
+  private showEvents(events: CityEvent[]) {
+    this.clearGroup(this.eventGroup);
+    if (!this.eventGroup.parent) this.scene.add(this.eventGroup);
+    for (const e of events) {
+      const hh = String(Math.floor(e.start / 3600)).padStart(2, '0');
+      const mm = String(Math.floor((e.start % 3600) / 60)).padStart(2, '0');
+      this.eventGroup.add(noteMarker(`★ ${e.name} · ${hh}:${mm} · ${e.attendance.toLocaleString()} people`, v3(e.p, this.hp(e.p))));
+    }
+  }
   private precip?: THREE.LineSegments | THREE.Points;
   private setWeather(w: Weather) {
     this.weather = w;
@@ -823,10 +835,12 @@ export class Engine implements WorldRenderer {
     p.position.y = ((p.position.y - fall) % 160 + 160) % 160 + t.y - 160;
     if (this.weather === 'snow') p.rotation.y += dt * 0.05;
   }
-  setSimParams(day: DayType, demandScale: number, weather: Weather) {
-    this.simParams = [day, demandScale, weather];
-    this.sim?.setParams(day, demandScale, weather);
-    this.setWeather(weather);
+  setSimParams(p: SimParams) {
+    const weatherChanged = p.weather !== this.simParams.weather || (p.weather !== 'clear' && !this.precip);
+    this.simParams = p;
+    this.sim?.setParams(p);
+    if (weatherChanged) this.setWeather(p.weather);
+    this.showEvents(p.events);
   }
 
   setZoneOptions(o: ZoneOptions) {

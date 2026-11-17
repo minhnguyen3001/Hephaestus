@@ -26,11 +26,7 @@ function handle(m: ToWorker) {
   else if (m.t === 'step') sim.step(m.dt);
   else if (m.t === 'time') sim.time = m.time;
   else if (m.t === 'watch') watched = m.id;
-  else if (m.t === 'params') {
-    sim.day = m.day;
-    sim.demandScale = m.demandScale;
-    sim.weather = m.weather;
-  }
+  else if (m.t === 'params') sim.setParams(m.params);
   const frame = encodeFrame(sim, watched, frames++ % 15 === 0);
   self.postMessage(frame, [frame.buf.buffer]);
 }

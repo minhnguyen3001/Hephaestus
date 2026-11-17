@@ -5,7 +5,7 @@ import { hash01, pointInPolygon } from '../geo/util';
 import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
-import { signalPhase, type DayType, type Weather } from '../sim/simulation';
+import { signalPhase, type CityEvent, type SimParams, type Weather } from '../sim/simulation';
 import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
 import { PRESETS } from './quality';
@@ -73,6 +73,7 @@ export class Plan2D implements WorldRenderer {
     preselect: (sel) => (this.selected = sel),
     clearPreview: () => (this.hover = undefined),
     drawDraft: () => undefined, // drawn every frame
+    placeEvent: (p) => this.cb.onPlaceEvent?.(p),
   });
 
   constructor(private container: HTMLElement, private cb: EngineCallbacks) {
@@ -180,13 +181,19 @@ export class Plan2D implements WorldRenderer {
     return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
-  private simParams: [DayType, number, Weather] = ['weekday', 1, 'clear'];
-  setSimParams(day: DayType, demandScale: number, weather: Weather) {
-    this.simParams = [day, demandScale, weather];
-    this.sim?.setParams(day, demandScale, weather);
+  private simParams: SimParams = { day: 'weekday', demandScale: 1, weather: 'clear', events: [] };
+  setSimParams(p: SimParams) {
+    this.simParams = p;
+    this.sim?.setParams(p);
+    const weather = p.weather;
+    this.showEvents(p.events);
     this.weather = weather;
   }
   private weather: Weather = 'clear';
+  private events: CityEvent[] = [];
+  private showEvents(e: CityEvent[]) {
+    this.events = e;
+  }
 
   setZoneOptions(o: ZoneOptions) {
     this.tools.zone = o;
@@ -222,7 +229,7 @@ export class Plan2D implements WorldRenderer {
     this.sim?.dispose();
     // The plan view is the low-end path, so it uses the low agent budget.
     this.sim = new SimClient(world, region, PRESETS.low.maxAgents, seed, time);
-    this.sim.setParams(...this.simParams);
+    this.sim.setParams(this.simParams);
   }
 
   private buildPaths() {
@@ -441,7 +448,7 @@ export class Plan2D implements WorldRenderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = '600 12px Inter, system-ui, sans-serif';
     ctx.textBaseline = 'middle';
-    for (const n of this.world?.notes ?? []) {
+    for (const n of [...(this.world?.notes ?? []), ...this.events.map((e) => ({ p: e.p, text: `★ ${e.name} · ${e.attendance.toLocaleString()} people` }))]) {
       const x = (n.p[0] - this.cx) * this.scale + W / dpr / 2;
       const y = -(n.p[1] - this.cy) * this.scale + H / dpr / 2;
       const label = n.text.length > 40 ? `${n.text.slice(0, 39)}…` : n.text;

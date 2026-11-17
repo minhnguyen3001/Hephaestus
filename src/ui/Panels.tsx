@@ -4,7 +4,7 @@ import { signedArea } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
-import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats, type Weather } from '../sim/simulation';
+import { AGENT_KINDS, buildingCapacity, type CityEvent, type DayType, type SimStats, type Weather } from '../sim/simulation';
 import type { Note, Vec2 } from '../geo/types';
 import type { Insight } from './advisor';
 import { CHALLENGES, evaluate } from './challenges';
@@ -209,7 +209,7 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -255,6 +255,26 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
                 {i.at && onLook && <button className="link" onClick={() => onLook(i.at!)}>Show me →</button>}
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+      {events && events.length > 0 && (
+        <div className="notes events">
+          <h4>Events</h4>
+          <ul>
+            {events.map((e) => {
+              const t = stats?.time ?? 0;
+              const phase = t >= e.start - 5400 && t < e.start ? 'crowd arriving' : t >= e.start && t < e.start + 7200 ? 'in progress' : t >= e.start + 7200 && t < e.start + 10800 ? 'crowd leaving' : 'scheduled';
+              const hh = String(Math.floor(e.start / 3600)).padStart(2, '0');
+              const mm = String(Math.floor((e.start % 3600) / 60)).padStart(2, '0');
+              return (
+                <li key={e.id}>
+                  <span>★ {e.name} {hh}:{mm} · {e.attendance.toLocaleString()} · <b>{phase}</b></span>
+                  {onLook && <button className="link" onClick={() => onLook(e.p)}>Show</button>}
+                  {onRemoveEvent && <button className="icon-btn" aria-label="Remove event" onClick={() => onRemoveEvent(e.id)}>✕</button>}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

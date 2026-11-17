@@ -257,6 +257,18 @@ describe('simulation', () => {
     expect(snow.speed).toBeLessThan(clear.speed);
   });
 
+  it('events draw crowds before they start and send them home after', () => {
+    const sim = new Simulation(gridFixture(), profileFor('us'), 200, 4);
+    sim.time = 18 * 3600;
+    sim.setParams({ day: 'weekday', demandScale: 1, weather: 'clear', events: [{ id: 'e', p: [0, 0], start: 19 * 3600, attendance: 20000, name: 'Concert' }] });
+    sim.step(600);
+    const going = sim.agents.filter((a) => a.purpose === 'event' && a.to === 'Concert').length;
+    expect(going).toBeGreaterThan(10);
+    sim.time = 21.2 * 3600;
+    sim.step(600);
+    expect(sim.agents.some((a) => a.purpose === 'event' && a.from === 'Concert')).toBe(true);
+  });
+
   it('dispatches emergency vehicles from hospitals and civic buildings', () => {
     const w = gridFixture();
     w.buildings[0] = { ...w.buildings[0], use: 'health', name: 'General Hospital' };

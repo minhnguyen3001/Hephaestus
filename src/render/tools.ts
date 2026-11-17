@@ -3,7 +3,7 @@ import { dist } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { Density, ZoneUse } from '../project/zoning';
 
-export type Tool = 'select' | 'build' | 'road' | 'bulldoze' | 'transit' | 'zone' | 'note';
+export type Tool = 'select' | 'build' | 'road' | 'bulldoze' | 'transit' | 'zone' | 'note' | 'event';
 
 export interface Hit {
   kind: 'agent' | 'building' | 'road' | 'ground';
@@ -19,6 +19,7 @@ export const TOOL_HINTS: Record<Tool, string | null> = {
   transit: 'Click to place stops in order, then press Finish (or Enter). Bus stops snap to streets.',
   zone: 'Click the corners of an area, then Finish (or Enter). It fills with buildings of the chosen use.',
   note: 'Click anywhere to pin a note to the plan. Notes travel with share links.',
+  event: 'Click where a concert or game happens. Crowds arrive over the next 90 minutes and leave afterwards.',
 };
 
 export interface ZoneOptions {
@@ -28,7 +29,7 @@ export interface ZoneOptions {
 }
 
 /** What a click should be able to hit for each tool (only Select can pick people and vehicles). */
-export const pickMode = (t: Tool): 'all' | 'static' | 'ground' => (t === 'road' || t === 'transit' || t === 'zone' || t === 'note' ? 'ground' : t === 'select' ? 'all' : 'static');
+export const pickMode = (t: Tool): 'all' | 'static' | 'ground' => (t === 'road' || t === 'transit' || t === 'zone' || t === 'note' || t === 'event' ? 'ground' : t === 'select' ? 'all' : 'static');
 
 export function snapNode(world: WorldData | undefined, p: Vec2, radius = 25): { p: Vec2; node?: string } {
   let best: { p: Vec2; node?: string } = { p };
@@ -55,6 +56,7 @@ export interface ToolHost {
   preselect(sel: { type: 'building'; id: string }): void;
   clearPreview(): void;
   drawDraft(): void;
+  placeEvent(p: Vec2): void;
 }
 
 const LINE_COLORS = [0xe5484d, 0x8e44ad, 0x16a085, 0xf39c12, 0x2980b9, 0xd35400, 0x27ae60];
@@ -137,6 +139,8 @@ export class ToolController {
           heightSource: 'user', use: 'residential', useSource: 'user', origin: 'proposed', name: 'Proposed building',
         },
       });
+    } else if (this.tool === 'event') {
+      h.placeEvent(hit.p);
     } else if (this.tool === 'note') {
       const text = typeof window !== 'undefined' ? window.prompt('Note for this spot:')?.trim() : '';
       if (text) h.onEdit({ kind: 'addNote', note: { id: `u-n-${Date.now().toString(36)}`, p: hit.p, text: text.slice(0, 280) } });

@@ -1,7 +1,7 @@
 import type { Vec2, WorldData } from '../geo/types';
 import { decodeAgents, encodeFrame, infoOf, type AgentView, type Frame, type Info, type ToWorker } from './protocol';
 import type { RegionProfile } from './region';
-import { Simulation, type AgentInfo, type DayType, type Weather, type SignalHead, type SimStats, type TrainCar, type TransitLineView } from './simulation';
+import { Simulation, type AgentInfo, type SimParams, type SignalHead, type SimStats, type TrainCar, type TransitLineView } from './simulation';
 
 /**
  * Runs the simulation off the main thread (Web Worker) when possible, inline otherwise.
@@ -112,12 +112,9 @@ export class SimClient {
     } else this.post({ t: 'time', time: t });
   }
 
-  setParams(day: DayType, demandScale: number, weather: Weather = 'clear') {
-    if (this.inline) {
-      this.inline.day = day;
-      this.inline.demandScale = demandScale;
-      this.inline.weather = weather;
-    } else this.post({ t: 'params', day, demandScale, weather });
+  setParams(p: SimParams) {
+    if (this.inline) this.inline.setParams(p);
+    else this.post({ t: 'params', params: p });
   }
 
   watch(id: number | null) {

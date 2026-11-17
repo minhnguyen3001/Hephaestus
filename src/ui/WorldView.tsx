@@ -11,7 +11,8 @@ import { Plan2D } from '../render/plan2d';
 import type { QualitySetting } from '../render/quality';
 import { makeProjection } from '../geo/util';
 import { profileFor } from '../sim/region';
-import type { DayType, SimStats, Weather } from '../sim/simulation';
+import type { CityEvent, DayType, SimStats, Weather } from '../sim/simulation';
+import type { Vec2 } from '../geo/types';
 import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
@@ -27,6 +28,7 @@ const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'transit', label: 'Transit line', key: '5', icon: '⇆' },
   { id: 'zone', label: 'Zone area', key: '6', icon: '▣' },
   { id: 'note', label: 'Note pin', key: '7', icon: '✎' },
+  { id: 'event', label: 'Event crowd', key: '8', icon: '★' },
 ];
 const ONBOARD_KEY = 'gcs.onboarded.v1';
 const QUALITY_KEY = 'gcs.quality';
@@ -74,6 +76,9 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [day, setDay] = useState<DayType>('weekday');
   const [horizon, setHorizon] = useState(0);
   const [weather, setWeather] = useState<Weather>('clear');
+  const [events, setEvents] = useState<CityEvent[]>([]);
+  const statsRef = useRef<SimStats | null>(null);
+  statsRef.current = stats;
   const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -138,6 +143,13 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       onStats: setStats,
       onPerf: setPerf,
       onHint: setHint,
+      onPlaceEvent: (p: Vec2) => {
+        const now = statsRef.current?.time ?? 7.5 * 3600;
+        const start = Math.ceil((now + 3600) / 900) * 900 % 86400;
+        const attendance = 8000;
+        setEvents((es) => [...es, { id: `ev-${Date.now().toString(36)}`, p, start, attendance, name: es.length % 2 ? 'Stadium game' : 'Concert' }]);
+        setHint(`Event at ${String(Math.floor(start / 3600)).padStart(2, '0')}:${String(Math.floor((start % 3600) / 60)).padStart(2, '0')} — 8,000 people will start arriving now. Speed up time and watch the streets and transit.`);
+      },
     };
     let r: WorldRenderer;
     if (mode === '3d') {
@@ -190,7 +202,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   useEffect(() => engine.current?.setLayers(layers), [layers, quality, mode]);
   useEffect(() => engine.current?.setLineMode(lineMode), [lineMode, quality, mode]);
   useEffect(() => engine.current?.setZoneOptions(zoneOpts), [zoneOpts, quality, mode]);
-  useEffect(() => engine.current?.setSimParams(day, (1 + region.growth) ** horizon, weather), [day, horizon, weather, region, quality, mode]);
+  useEffect(
+    () => engine.current?.setSimParams({ day, demandScale: (1 + region.growth) ** horizon, weather, events }),
+    [day, horizon, weather, events, region, quality, mode],
+  );
   useEffect(() => {
     if (engine.current) {
       engine.current.running = running;
@@ -491,6 +506,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
           insights={insights}
           notes={proposed?.notes ?? []}
+          events={events}
+          onRemoveEvent={(id) => setEvents((es) => es.filter((e) => e.id !== id))}
           onRemoveNote={editable ? (id) => edit({ kind: 'removeNote', id }) : undefined}
           onLook={(p) => engine.current?.lookAt(p)}
           onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />

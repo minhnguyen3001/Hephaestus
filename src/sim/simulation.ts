@@ -7,7 +7,7 @@ const CYCLE = 64;
 
 export type AgentKind = 'pedestrian' | 'bicycle' | 'motorcycle' | 'car' | 'taxi' | 'truck' | 'bus' | 'emergency';
 export const AGENT_KINDS: AgentKind[] = ['pedestrian', 'bicycle', 'motorcycle', 'car', 'taxi', 'truck', 'bus', 'emergency'];
-export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service' | 'emergency call';
+export type Purpose = 'commute' | 'return home' | 'school' | 'shopping' | 'leisure' | 'delivery' | 'to transit stop' | 'from transit stop' | 'transit service' | 'emergency call' | 'event';
 
 export interface Agent {
   id: number;
@@ -220,6 +220,22 @@ const isVehicle = (k: AgentKind) => k !== 'pedestrian' && k !== 'bicycle';
 
 export type DayType = 'weekday' | 'weekend';
 export type Weather = 'clear' | 'rain' | 'snow' | 'fog';
+
+/** A one-off crowd: attendees arrive over the 90 minutes before `start` and leave 2–3 hours after it. */
+export interface CityEvent {
+  id: string;
+  p: Vec2;
+  start: number; // seconds of day
+  attendance: number;
+  name: string;
+}
+
+export interface SimParams {
+  day: DayType;
+  demandScale: number;
+  weather: Weather;
+  events: CityEvent[];
+}
 const WEATHER_SPEED: Record<Weather, number> = { clear: 1, rain: 0.85, snow: 0.65, fog: 0.85 };
 
 /** Daily travel-demand curve in [0,1]. Weekdays: AM/PM commute peaks; weekends: one broad leisure peak. */
@@ -281,6 +297,33 @@ export class Simulation {
   /** Multiplier on travel demand (timeline projections). Capped to protect frame rate. */
   demandScale = 1;
   weather: Weather = 'clear';
+  private events: { ev: CityEvent; site: Site }[] = [];
+
+  setParams(p: SimParams) {
+    this.day = p.day;
+    this.demandScale = p.demandScale;
+    this.weather = p.weather;
+    this.events = p.events.map((ev) => ({
+      ev,
+      site: { label: ev.name, c: ev.p, residents: 0, jobs: 0, attract: 0, school: 0, freight: 0, carNode: this.graph.nearestNode(ev.p, 'car'), walkNode: this.graph.nearestNode(ev.p, 'walk') },
+    }));
+  }
+
+  /** Extra demand from events right now, as a fraction of normal demand, and the trip to make if chosen. */
+  private eventPull(): { boost: number; pick?: () => { purpose: Purpose; o?: Site; d?: Site } } {
+    const t = this.time;
+    let boost = 0;
+    let pick: (() => { purpose: Purpose; o?: Site; d?: Site }) | undefined;
+    for (const { ev, site } of this.events) {
+      const share = Math.min(0.8, (ev.attendance / Math.max(1000, this.totals.residents)) * 4);
+      const arriving = t >= ev.start - 5400 && t < ev.start;
+      const leaving = t >= ev.start + 7200 && t < ev.start + 10800;
+      if (!arriving && !leaving) continue;
+      boost += share;
+      pick = () => (arriving ? { purpose: 'event', o: this.samplers.residents.sample(this.rand()), d: site } : { purpose: 'event', o: site, d: this.samplers.residents.sample(this.rand()) });
+    }
+    return { boost, pick };
+  }
 
   constructor(world: WorldData, readonly region: RegionProfile, public maxAgents = 400, seed = 1) {
     this.rand = rng(seed);
@@ -638,6 +681,8 @@ export class Simulation {
 
   private pickPurpose(): { purpose: Purpose; o?: Site; d?: Site } {
     const h = this.time / 3600;
+    const pull = this.eventPull();
+    if (pull.pick && this.rand() < pull.boost / (1 + pull.boost)) return pull.pick();
     const r = this.rand();
     const s = this.samplers;
     const pick = (k: keyof typeof s) => s[k].sample(this.rand());
@@ -828,7 +873,8 @@ export class Simulation {
     const g = this.graph;
 
     // Keep the population of moving agents near demand for this time of day.
-    const target = Math.round(this.maxAgents * Math.min(1.8, this.demandScale) * demandAt(this.time / 3600, this.day));
+    const pull = this.eventPull();
+    const target = Math.round(this.maxAgents * Math.min(1.8, this.demandScale * (1 + pull.boost)) * demandAt(this.time / 3600, this.day));
     let movers = 0;
     for (const a of this.agents) if (!a.bus) movers++;
     // While warming up, spawn in bounded batches (placed mid-trip) so no single tick stalls.
