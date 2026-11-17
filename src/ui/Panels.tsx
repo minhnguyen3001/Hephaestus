@@ -5,6 +5,8 @@ import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
 import { AGENT_KINDS, buildingCapacity, type DayType, type SimStats } from '../sim/simulation';
+import type { Vec2 } from '../geo/types';
+import type { Insight } from './advisor';
 import { CHALLENGES, evaluate } from './challenges';
 import type { CityMetrics } from './metrics';
 
@@ -196,7 +198,7 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string }) {
+export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -230,6 +232,20 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
             <option key={c.id} value={c.id}>{c.title}{c.id === suggestedChallenge ? ' (suggested here)' : ''}</option>
           ))}
         </select>
+      )}
+      {insights && insights.length > 0 && (
+        <div className="advisor">
+          <h4>Planning advisor</h4>
+          <ul>
+            {insights.map((i) => (
+              <li key={i.id} className={i.severity}>
+                <strong>{i.title}</strong>
+                <span>{i.detail}</span>
+                {i.at && onLook && <button className="link" onClick={() => onLook(i.at!)}>Show me →</button>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <h3>Urban impact</h3>
       <p className="note">{editCount ? `Proposal vs. today (${editCount} change${editCount === 1 ? '' : 's'})` : 'Today’s city — make a change to compare.'}</p>

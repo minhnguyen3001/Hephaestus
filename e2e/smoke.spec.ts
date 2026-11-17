@@ -246,3 +246,17 @@ test('underground x-ray shows subway tunnels', async ({ page }) => {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'test-results/17-underground.png' });
 });
+
+test('advisor points at problems and flies there', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Nob Hill/ }).click();
+  await expect(page.locator('.advisor')).toBeVisible({ timeout: 30_000 });
+  await page.screenshot({ path: 'test-results/18-advisor.png' });
+  const show = page.getByRole('button', { name: 'Show me →' }).first();
+  if (await show.isVisible()) await show.click();
+  await page.getByLabel('Take a challenge').selectOption('transit');
+  await expect(page.locator('.challenge')).toContainText('Transit for all');
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: 'test-results/19-challenge.png' });
+});

@@ -313,6 +313,21 @@ describe('challenges', () => {
   });
 });
 
+describe('advisor', () => {
+  it('flags transit gaps with a location and clears them when served', async () => {
+    const { advise } = await import('../ui/advisor');
+    const { cityMetrics } = await import('../ui/metrics');
+    const base = gridFixture();
+    const m = cityMetrics(base);
+    const tips = advise(base, m, m, null, new Map());
+    const gap = tips.find((t) => t.id === 'transit-gap');
+    expect(gap?.at).toBeDefined();
+    const served = applyEdits(base, [{ kind: 'addLine', line: { id: 'l', name: 'A', mode: 'metro', stops: [[-150, -150], [150, -150], [150, 150], [-150, 150], [-150, -150]], color: 1 } }]);
+    const m2 = cityMetrics(served);
+    expect(advise(served, m2, m, null, new Map()).some((t) => t.id === 'transit-gap')).toBe(false);
+  });
+});
+
 describe('trees', () => {
   it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
     const { treePoints } = await import('../geo/trees');

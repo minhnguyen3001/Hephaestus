@@ -17,6 +17,7 @@ import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
 import { Tour, type TourSignals } from './Tour';
 import { suggested } from './challenges';
+import { advise, type Insight } from './advisor';
 
 const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select & inspect', key: '1', icon: '➚' },
@@ -83,6 +84,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   });
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
   const [beyond, setBeyond] = useState<{ lat: number; lon: number } | null>(null);
+  const [insights, setInsights] = useState<Insight[]>([]);
   const [tour, setTour] = useState<TourSignals>({ cameraMoved: false, inspected: false, orbited: false, edited: false, compared: false, fast: false });
   const mark = useCallback((k: keyof TourSignals) => setTour((t) => (t[k] ? t : { ...t, [k]: true })), []);
 
@@ -258,6 +260,20 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }, []);
 
   const setCam = (m: CameraMode) => engine.current?.setCameraMode(m);
+
+  // The advisor re-reads the plan and live simulation every few seconds.
+  const adviseRef = useRef({ proposed, proposedMetrics, originalMetrics, stats });
+  adviseRef.current = { proposed, proposedMetrics, originalMetrics, stats };
+  useEffect(() => {
+    if (!dashOpen) return;
+    const run = () => {
+      const a = adviseRef.current;
+      if (a.proposed && a.proposedMetrics && a.originalMetrics) setInsights(advise(a.proposed, a.proposedMetrics, a.originalMetrics, a.stats, engine.current?.roadSpeeds() ?? new Map()));
+    };
+    run();
+    const t = setInterval(run, 4000);
+    return () => clearInterval(t);
+  }, [dashOpen, base]);
 
   // Panning past the loaded area offers to load the city there (a new project centred on that spot).
   useEffect(() => {
@@ -466,6 +482,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           challenge={project.challenge}
           suggestedChallenge={suggested(project.place.name, project.place.countryCode)?.id}
           onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
+          insights={insights}
+          onLook={(p) => engine.current?.lookAt(p)}
           onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
       )}
 

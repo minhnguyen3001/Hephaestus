@@ -98,3 +98,20 @@ export function makeSampler<T>(items: T[], weight: (t: T) => number) {
     },
   };
 }
+
+/** Fast "is any point within r?" queries via a uniform grid (cell = r). */
+export function makeNear(points: Vec2[], r: number) {
+  const grid = new Map<string, Vec2[]>();
+  for (const p of points) {
+    const k = `${Math.floor(p[0] / r)},${Math.floor(p[1] / r)}`;
+    (grid.get(k) ?? grid.set(k, []).get(k)!).push(p);
+  }
+  return (p: Vec2): boolean => {
+    const cx = Math.floor(p[0] / r);
+    const cy = Math.floor(p[1] / r);
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        for (const q of grid.get(`${cx + dx},${cy + dy}`) ?? []) if (Math.hypot(q[0] - p[0], q[1] - p[1]) < r) return true;
+    return false;
+  };
+}

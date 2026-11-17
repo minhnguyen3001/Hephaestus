@@ -59,6 +59,8 @@ export interface WorldRenderer {
   getView(): SavedView;
   setView(v: SavedView): void;
   setSimParams(day: DayType, demandScale: number): void;
+  lookAt(p: Vec2): void;
+  roadSpeeds(): Map<string, number>;
   dispose(): void;
 }
 
@@ -713,6 +715,15 @@ export class Engine implements WorldRenderer {
 
   finishDraft() {
     this.tools.finish(this.world);
+  }
+
+  lookAt(p: Vec2) {
+    this.followId = null;
+    this.flyTo(v3(p, this.hp(p)), 260, 0.95);
+  }
+
+  roadSpeeds() {
+    return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
   private simParams: [DayType, number] = ['weekday', 1];

@@ -7,14 +7,14 @@ import { writeFileSync } from 'node:fs';
  */
 const results: Record<string, unknown> = {};
 
-for (const view of ['2d', '3d'] as const) {
-  test(`perf ${view} low quality, 4x CPU throttle`, async ({ page }) => {
+for (const [view, q] of [['2d', 'low'], ['3d', 'low'], ['3d', 'high']] as const) {
+  test(`perf ${view} ${q} quality, 4x CPU throttle`, async ({ page }) => {
     test.setTimeout(240_000);
-    await page.addInitScript((v) => {
+    await page.addInitScript(([v, qq]) => {
       localStorage.setItem('gcs.onboarded.v1', '1');
       localStorage.setItem('gcs.view', v);
-      localStorage.setItem('gcs.quality', 'low');
-    }, view);
+      localStorage.setItem('gcs.quality', qq);
+    }, [view, q]);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     await page.goto('/');
@@ -34,7 +34,7 @@ for (const view of ['2d', '3d'] as const) {
       }
     }
     const agents = await page.locator('.dashboard .metric').filter({ hasText: 'Agents moving' }).locator('strong').innerText().catch(() => '?');
-    results[view] = { readyMs: ready, fps: samples, medianFps: samples.sort((a, b) => a - b)[Math.floor(samples.length / 2)], medianFrameMs: ms.sort((a, b) => a - b)[Math.floor(ms.length / 2)], agents };
+    results[`${view}-${q}`] = { readyMs: ready, fps: samples, medianFps: samples.sort((a, b) => a - b)[Math.floor(samples.length / 2)], medianFrameMs: ms.sort((a, b) => a - b)[Math.floor(ms.length / 2)], agents };
     writeFileSync('test-results/perf.json', JSON.stringify(results, null, 2));
   });
 }

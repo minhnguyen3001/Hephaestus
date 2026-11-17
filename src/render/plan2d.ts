@@ -169,6 +169,16 @@ export class Plan2D implements WorldRenderer {
     this.tools.finish(this.world);
   }
 
+  lookAt(p: Vec2) {
+    this.followId = null;
+    [this.cx, this.cy] = p;
+    this.scale = Math.max(this.scale, Math.min(this.canvas.clientWidth, this.canvas.clientHeight) / 500);
+  }
+
+  roadSpeeds() {
+    return this.sim?.roadSpeed ?? new Map<string, number>();
+  }
+
   private simParams: [DayType, number] = ['weekday', 1];
   setSimParams(day: DayType, demandScale: number) {
     this.simParams = [day, demandScale];

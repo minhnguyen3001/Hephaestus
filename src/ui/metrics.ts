@@ -1,5 +1,5 @@
 import type { Vec2, WorldData } from '../geo/types';
-import { centroid, signedArea } from '../geo/util';
+import { centroid, makeNear, signedArea } from '../geo/util';
 import { buildingCapacity } from '../sim/simulation';
 
 export interface CityMetrics {
@@ -14,10 +14,6 @@ export interface CityMetrics {
   parkAccess: number; // share of residents within 300 m of a park
 }
 
-function nearAny(p: Vec2, pts: Vec2[], r: number) {
-  for (const q of pts) if (Math.abs(q[0] - p[0]) < r && Math.abs(q[1] - p[1]) < r && Math.hypot(q[0] - p[0], q[1] - p[1]) < r) return true;
-  return false;
-}
 
 /** Planning indicators derived from a scenario. All capacity figures are model estimates. */
 export function cityMetrics(w: WorldData): CityMetrics {
@@ -36,6 +32,8 @@ export function cityMetrics(w: WorldData): CityMetrics {
   const stops: Vec2[] = (w.transitLines ?? []).flatMap((l) => l.stops);
   for (const r of w.rails) if (r.kind !== 'tram') for (let i = 0; i < r.points.length; i += 4) stops.push(r.points[i]);
   const parkPts: Vec2[] = w.areas.filter((a) => a.kind === 'park').flatMap((a) => a.polygon);
+  const nearStop = makeNear(stops, 400);
+  const nearPark = makeNear(parkPts, 300);
   let res = 0;
   let resTransit = 0;
   let resPark = 0;
@@ -44,8 +42,8 @@ export function cityMetrics(w: WorldData): CityMetrics {
     if (!r) continue;
     const c = centroid(b.footprint);
     res += r;
-    if (nearAny(c, stops, 400)) resTransit += r;
-    if (nearAny(c, parkPts, 300)) resPark += r;
+    if (nearStop(c)) resTransit += r;
+    if (nearPark(c)) resPark += r;
   }
   let green = 0;
   for (const a of w.areas) if (a.kind === 'park') green += Math.abs(signedArea(a.polygon));

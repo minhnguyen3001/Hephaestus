@@ -17,8 +17,11 @@ Headless Chromium, **software rendering (SwiftShader, no GPU)**, **4× CPU throt
 
 | View | Ready | Main-thread ms/frame | fps (headless) | Agents |
 | --- | --- | --- | --- | --- |
-| 2D plan | 8.0 s | **0.8 ms** | 16 | 146 |
-| 3D Low | 12.7 s | **1.4 ms** | 10 | 146 |
+| 2D plan | 6.5 s | **0.7 ms** | 18 | 146 |
+| 3D Low | 9.7 s | **1.8 ms** | 11 | 146 |
+| 3D High | 14.1 s | **4.1 ms** | 12 | ~800 |
+
+Accessibility metrics and the advisor use grid-based proximity lookups. Earlier O(homes × stops) scans caused 100+ ms spikes in dense cities.
 
 How to read this: our JavaScript per frame is tiny, even on a throttled CPU. The fps cap in headless runs comes from software rasterisation and compositing, not from the app. On a real integrated GPU, rendering cost is dominated by the GPU, and the scene uses only a few dozen draw calls thanks to merged and instanced geometry.
 
