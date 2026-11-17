@@ -62,5 +62,5 @@ Dev tools: `scripts/profile-load.ts` (load stages), `scripts/profile-sim.ts` (si
 
 ## Owner decisions
 - Approved: the master brief; **zero cost**; **automatic GitHub operations**; continuous autonomous work.
-- Pending: free public hosting (needs a public repo or a free host account), product name.
+- Decided: product name **Hephaestus**. The repo is public and deploys to GitHub Pages (`.github/workflows/pages.yml`, base `/Hephaestus/`).
 - Constraints: no paid services; label estimated and synthetic data; no force-push or history rewrite.

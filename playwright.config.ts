@@ -8,5 +8,6 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
   },
+  testIgnore: 'pages-check.spec.ts',
   webServer: { command: 'npm run build && npx vite preview --port 4173 --strictPort', url: 'http://localhost:4173', reuseExistingServer: true, timeout: 120_000 },
 });

@@ -1,6 +1,6 @@
-# Global City Simulator
+# Hephaestus
 
-*(repository: Hephaestus — working product name: Global City Simulator)*
+**Live demo:** https://minhnguyen3001.github.io/Hephaestus/
 
 A browser-based 3D city-building and urban-planning simulator built on **real-world geography**. Search almost any place on Earth, explore its actual streets and buildings in 3D, redesign them, and watch a living simulation of synthetic people, cars, motorbikes, buses and trains respond.
 
@@ -90,6 +90,10 @@ The simulation is fully separate from rendering, so it can move to a Web Worker 
 - No accounts, sharing or collaboration yet. Projects are stored in this browser only.
 - Live Overpass loading of non-featured places can take 30–60 s when public servers are busy.
 - **Simulation results are illustrative, not forecasts.** This is not a substitute for professional engineering or transport studies.
+
+## Deployment
+
+Every push to `main` builds and deploys to **GitHub Pages** for free, using `.github/workflows/pages.yml`. The production build uses the base path `/Hephaestus/`. To build the same thing locally, run `npm run build:pages`.
 
 ## Contributing
 

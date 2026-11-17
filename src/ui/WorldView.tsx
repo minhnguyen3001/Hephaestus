@@ -403,7 +403,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       <div className="viewport" ref={host} />
 
       <header className="topbar">
-        <button className="brand small" onClick={onExit} title="Back to start"><span className="logo" /><span className="hide-sm">Global City Simulator</span></button>
+        <button className="brand small" onClick={onExit} title="Back to start"><span className="logo" /><span className="hide-sm">Hephaestus</span></button>
         <div className="project">
           <input
             value={project.name}

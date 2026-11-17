@@ -7,8 +7,8 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - **GitHub on autopilot.** Commit, push and merge to `main` automatically.
 
 ## Awaiting owner decision
-- [ ] Free public hosting. The repo is private, and GitHub Pages is paid for private repos. Options: make the repo public (free Pages via Actions), or connect a free Vercel, Netlify or Cloudflare Pages account.
-- [ ] Product name: keep "Global City Simulator", or adopt "Hephaestus" or another brand.
+- [x] Name: **Hephaestus** (owner, 2026-11-17)
+- [x] Hosting: repo goes public, deployed free to GitHub Pages via Actions
 
 ## P0
 - [ ] Real-device QA (old Windows laptop with integrated GPU, iPad, Android phone, Safari). Note: 3D High in headless SwiftShader costs ~150 ms/frame; verify on real GPUs
