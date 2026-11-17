@@ -13,10 +13,10 @@ const M = 1 / 110574; // ~1 m in degrees latitude
 const LON_M = 1 / (111320 * Math.cos((C.lat * Math.PI) / 180));
 
 /** A 5x5 street grid (100 m blocks) with one building per block, built as raw Overpass JSON. */
-function gridFixture() {
+function gridFixture(block = 100) {
   const elements: unknown[] = [];
   const node = (i: number, j: number) => i * 10 + j + 1;
-  const ll = (i: number, j: number) => ({ lat: C.lat + (j * 100 - 200) * M, lon: C.lon + (i * 100 - 200) * LON_M });
+  const ll = (i: number, j: number) => ({ lat: C.lat + (j - 2) * block * M, lon: C.lon + (i - 2) * block * LON_M });
   let wid = 1000;
   for (let i = 0; i < 5; i++) {
     const ids = [0, 1, 2, 3, 4].map((j) => node(i, j));
@@ -34,7 +34,7 @@ function gridFixture() {
       elements.push({ type: 'way', id: wid++, nodes: [...ids, ids[0]], geometry: [...corners, corners[0]], tags: { building: use, 'building:levels': '6' } });
     }
   elements.push({ type: 'node', id: node(2, 2), tags: { highway: 'traffic_signals' } });
-  return parseOverpass({ elements } as never, C, 300);
+  return parseOverpass({ elements } as never, C, block * 3);
 }
 
 describe('geo', () => {
@@ -214,6 +214,19 @@ describe('simulation', () => {
     expect(metro.vehicles).toBeGreaterThanOrEqual(2);
     expect(bus.boardings + metro.boardings).toBeGreaterThan(5);
     expect(sim.trainCars().some((c) => c.color === 0x8e44ad)).toBe(true);
+  });
+
+  it('riders transfer between two lines that meet', () => {
+    const base = gridFixture(700); // a 2.8 km grid, so riding two lines beats walking
+    // Line A runs along the south street west→east; line B runs up the east street. They meet in the SE corner.
+    const world = applyEdits(base, [
+      { kind: 'addLine', line: { id: 'a', name: 'A', mode: 'metro', stops: [[-1400, -1400], [-700, -1400], [0, -1400], [700, -1400], [1400, -1400]], color: 1 } },
+      { kind: 'addLine', line: { id: 'b', name: 'B', mode: 'metro', stops: [[1400, -1400], [1400, -700], [1400, 0], [1400, 700], [1400, 1400]], color: 2 } },
+    ]);
+    const region = { ...profileFor('us'), modeShare: { car: 0, taxi: 0, motorcycle: 0, bicycle: 0, bus: 1, walk: 0.01 } };
+    const sim = new Simulation(world, region, 250, 21);
+    sim.step(3600);
+    expect(sim.stats().transfers).toBeGreaterThan(0);
   });
 
   it('dispatches emergency vehicles from hospitals and civic buildings', () => {

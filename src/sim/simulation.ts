@@ -55,7 +55,11 @@ interface Rider {
   to: number; // stop id to alight at
   destWalk: number;
   destLabel: string;
+  /** Second leg after a transfer. */
+  next?: { line: number; dir: 0 | 1; from: number; to: number };
 }
+
+type Leg = { line: number; dir: 0 | 1; from: number; to: number };
 
 interface Stop {
   id: number;
@@ -155,6 +159,7 @@ export interface SimStats {
   avgVehicleSpeedKmh: number;
   congestion: number;
   busRiders: number; // transit boardings
+  transfers: number;
   waitingAtStops: number;
   lines: LineStats[];
   residents: number;
@@ -254,6 +259,7 @@ export class Simulation {
   private nextId = 1;
   private tripsCompleted = 0;
   private busRiders = 0;
+  private transfers = 0;
   private rerouted = 0;
   private filled = false;
   private samplers!: Record<'residents' | 'jobs' | 'attract' | 'school' | 'freight' | 'any', ReturnType<typeof makeSampler<Site>>>;
@@ -589,9 +595,52 @@ export class Simulation {
   }
 
   /** Best line, direction and stops for a trip, if transit beats walking (≤ 700 m walk at each end). */
-  private planTransit(o: Site, d: Site): { line: number; dir: 0 | 1; from: number; to: number } | null {
+  /** All downstream stops reachable from a stop: [line, dir, stop index in sequence, later stop id]. */
+  private *ridesFrom(stopId: number): Generator<{ line: number; dir: 0 | 1; to: number }> {
+    for (const li of this.stops[stopId].lines) {
+      for (const dir of [0, 1] as const) {
+        const seq = this.transit[li].stopSeq[dir];
+        const i = seq.indexOf(stopId);
+        if (i < 0) continue;
+        for (let j = i + 1; j < seq.length; j++) yield { line: li, dir, to: seq[j] };
+      }
+    }
+  }
+
+  private planTransit(o: Site, d: Site): { first: Leg; next?: Leg } | null {
     const MAX = 700;
-    let best: { line: number; dir: 0 | 1; from: number; to: number } | null = null;
+    const direct = this.planDirect(o, d);
+    if (direct) return { first: direct };
+    // One transfer: line A to a stop within 150 m of a stop on line B, which reaches near the destination.
+    const TRANSFER = 150;
+    let best: { first: Leg; next: Leg } | null = null;
+    let bestCost = dist(o.c, d.c) * 0.8;
+    const origins = this.stops.filter((s) => dist(o.c, s.p) <= MAX);
+    const dests = new Set(this.stops.filter((s) => dist(s.p, d.c) <= MAX).map((s) => s.id));
+    if (!origins.length || !dests.size) return null;
+    for (const a of origins) {
+      const wa = dist(o.c, a.p);
+      for (const r1 of this.ridesFrom(a.id)) {
+        const t1 = this.stops[r1.to];
+        for (const t2 of this.stops) {
+          if (dist(t1.p, t2.p) > TRANSFER) continue;
+          for (const r2 of this.ridesFrom(t2.id)) {
+            if (r2.line === r1.line || !dests.has(r2.to)) continue;
+            const cost = wa + dist(this.stops[r2.to].p, d.c) + 300; // transfer penalty
+            if (cost < bestCost) {
+              bestCost = cost;
+              best = { first: { line: r1.line, dir: r1.dir, from: a.id, to: t1.id }, next: { line: r2.line, dir: r2.dir, from: t2.id, to: r2.to } };
+            }
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  private planDirect(o: Site, d: Site): Leg | null {
+    const MAX = 700;
+    let best: Leg | null = null;
     let bestCost = dist(o.c, d.c) * 0.8; // must beat walking most of the way
     for (const a of this.stops) {
       const wa = dist(o.c, a.p);
@@ -634,16 +683,17 @@ export class Simulation {
     if (mode === 'bus') {
       const plan = this.planTransit(o, d);
       if (plan) {
-        rider = { line: plan.line, dir: plan.dir, to: plan.to, destWalk: d.walkNode, destLabel: d.label };
-        stopId = plan.from;
-        const stop = this.stops[plan.from];
+        const { first, next } = plan;
+        rider = { line: first.line, dir: first.dir, to: first.to, destWalk: d.walkNode, destLabel: d.label, next };
+        stopId = first.from;
+        const stop = this.stops[first.from];
         path = g.route(o.walkNode, stop.walkNode, 'walk');
         if (path && path.length === 0) {
           stop.waiting.push(rider); // already at the stop
           return true;
         }
         p = 'to transit stop';
-        to = `${this.transit[plan.line].name} stop`;
+        to = `${this.transit[first.line].name} stop${next ? ` (then ${this.transit[next.line].name})` : ''}`;
       } else mode = D < 1500 ? 'walk' : 'car';
     }
     if (mode === 'walk' || (mode === 'bus' && !path)) {
@@ -846,8 +896,13 @@ export class Simulation {
     const stop = this.stops[stopId];
     let alight = 0;
     for (let i = riders.length - 1; i >= 0; i--) {
-      if (riders[i].to !== stopId) continue;
-      this.egress(riders[i], stop);
+      const r = riders[i];
+      if (r.to !== stopId) continue;
+      if (r.next) {
+        // transfer: wait for the second line at the (nearby) transfer stop
+        this.stops[r.next.from].waiting.push({ ...r, line: r.next.line, dir: r.next.dir, to: r.next.to, next: undefined });
+        this.transfers++;
+      } else this.egress(r, stop);
       riders.splice(i, 1);
       alight++;
     }
@@ -1020,6 +1075,7 @@ export class Simulation {
       avgVehicleSpeedKmh: vN ? (vSum / vN) * 3.6 : 0,
       congestion: vN ? slow / vN : 0,
       busRiders: this.busRiders,
+      transfers: this.transfers,
       waitingAtStops: waiting,
       lines: this.lineStats(),
       residents: Math.round(this.totals.residents),
