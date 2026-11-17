@@ -14,7 +14,10 @@ export type Edit =
   | { kind: 'removeRoad'; id: string }
   | { kind: 'addLine'; line: TransitLineSpec }
   | { kind: 'zone'; zone: Zone }
+  | { kind: 'setRoad'; id: string; patch: RoadPatch }
   | { kind: 'removeLine'; id: string };
+
+export type RoadPatch = Partial<Pick<Road, 'lanes' | 'oneway' | 'maxspeedKmh' | 'kind'>>;
 
 export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
   if (edits.length === 0) return base;
@@ -49,6 +52,11 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
       case 'addLine':
         lines.set(e.line.id, e.line);
         break;
+      case 'setRoad': {
+        const r = roads.get(e.id);
+        if (r) roads.set(e.id, { ...r, ...e.patch });
+        break;
+      }
       case 'zone': {
         const z = e.zone;
         if (z.replace) for (const id of buildingsInside(z.polygon, [...buildings.values()])) buildings.delete(id);
@@ -88,6 +96,7 @@ export function describeEdit(e: Edit): string {
     case 'removeRoad': return 'Remove road';
     case 'addLine': return `New ${e.line.mode} line`;
     case 'zone': return `Zone: ${e.zone.use}`;
+    case 'setRoad': return 'Edit road';
     case 'removeLine': return 'Remove transit line';
   }
 }

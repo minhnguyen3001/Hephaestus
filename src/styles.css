@@ -232,3 +232,5 @@ select.scenario { max-width: 150px; }
 .linebar .check { display: flex; gap: 6px; align-items: center; font-size: 12.5px; white-space: nowrap; }
 .linebar .check input { accent-color: var(--accent); }
 @media (max-width: 900px) { .linebar { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 28px); } }
+.field.row-check { flex-direction: row; align-items: center; gap: 8px; }
+.field.row-check input { accent-color: var(--accent); }

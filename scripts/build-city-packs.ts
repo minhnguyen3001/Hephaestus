@@ -14,16 +14,20 @@ import { buildOverpassQuery, OVERPASS_MIRRORS, PACK_RADIUS, packFile, slimElemen
 const UA = 'GlobalCitySimulator-pack-builder/0.1 (open-source city planning sim)';
 
 async function query(q: string): Promise<{ elements: unknown[] }> {
-  for (const m of OVERPASS_MIRRORS) {
-    try {
-      const r = await fetch(`${m}?data=${encodeURIComponent(q)}`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(180_000) });
-      if (r.ok) return (await r.json()) as { elements: unknown[] };
-      console.warn(`  ${m} → ${r.status}`);
-    } catch (e) {
-      console.warn(`  ${m} → ${(e as Error).message}`);
+  // Public servers are often busy: try every mirror, then back off and retry the whole round.
+  for (let round = 1; round <= 3; round++) {
+    for (const m of OVERPASS_MIRRORS) {
+      try {
+        const r = await fetch(`${m}?data=${encodeURIComponent(q)}`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(180_000) });
+        if (r.ok) return (await r.json()) as { elements: unknown[] };
+        console.warn(`  ${m} → ${r.status}`);
+      } catch (e) {
+        console.warn(`  ${m} → ${(e as Error).message}`);
+      }
     }
+    if (round < 3) await new Promise((res) => setTimeout(res, 30_000 * round));
   }
-  throw new Error('all mirrors failed');
+  throw new Error('all mirrors failed after 3 rounds');
 }
 
 const only = process.argv[2];

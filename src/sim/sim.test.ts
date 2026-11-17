@@ -220,6 +220,25 @@ describe('simulation', () => {
   });
 });
 
+describe('road editing and access metrics', () => {
+  it('edits road properties and the network follows', () => {
+    const base = gridFixture();
+    const id = base.roads[0].id;
+    const w = applyEdits(base, [{ kind: 'setRoad', id, patch: { kind: 'footway', oneway: false } }]);
+    const g = RoadGraph.build(w.roads);
+    const ped = g.edges.filter((e) => e.roadId === id);
+    expect(ped.every((e) => !e.car && e.walk)).toBe(true);
+  });
+
+  it('a drawn transit line raises transit access', async () => {
+    const { cityMetrics } = await import('../ui/metrics');
+    const base = gridFixture();
+    const before = cityMetrics(base).transitAccess;
+    const w = applyEdits(base, [{ kind: 'addLine', line: { id: 'l', name: 'A', mode: 'bus', stops: [[-150, -150], [150, 150], [-150, 150]], color: 1 } }]);
+    expect(cityMetrics(w).transitAccess).toBeGreaterThan(before);
+  });
+});
+
 describe('zoning', () => {
   it('fills a zone with buildings clear of streets, and makes parks', () => {
     const base = gridFixture();

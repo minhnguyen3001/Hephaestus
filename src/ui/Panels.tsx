@@ -39,10 +39,26 @@ export function Inspector({
           <p className="eyebrow">{sel.road.origin === 'proposed' ? 'Proposed road' : 'Road · OpenStreetMap'}</p>
           <h3>{sel.road.name ?? `Unnamed ${sel.road.kind} road`}</h3>
           <dl>
-            <dt>Type</dt><dd>{sel.road.kind}</dd>
-            <dt>Lanes</dt><dd>{sel.road.lanes}{sel.road.oneway ? ' · one-way' : ''}</dd>
-            <dt>Speed limit</dt><dd>{Math.round(sel.road.maxspeedKmh)} km/h</dd>
+            <dt>Type</dt><dd>{sel.road.kind === 'footway' ? 'pedestrian' : sel.road.kind}</dd>
           </dl>
+          {sel.road.kind !== 'footway' && sel.road.kind !== 'cycleway' ? (
+            <>
+              <label className="field">
+                <span>Lanes <strong>{sel.road.lanes}</strong></span>
+                <input type="range" min={1} max={8} step={1} value={sel.road.lanes} disabled={!editable} onChange={(e) => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { lanes: +e.target.value } })} />
+              </label>
+              <label className="field">
+                <span>Speed limit</span>
+                <select value={Math.round(sel.road.maxspeedKmh / 10) * 10} disabled={!editable} onChange={(e) => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { maxspeedKmh: +e.target.value } })}>
+                  {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((v) => <option key={v} value={v}>{v} km/h</option>)}
+                </select>
+              </label>
+              <label className="field row-check">
+                <input type="checkbox" checked={sel.road.oneway} disabled={!editable} onChange={(e) => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { oneway: e.target.checked } })} /> One-way
+              </label>
+              {editable && <button onClick={() => onEdit({ kind: 'setRoad', id: sel.road.id, patch: { kind: 'footway', oneway: false } })}>Make pedestrian street</button>}
+            </>
+          ) : <p className="note">Pedestrian/cycle path — cars can’t use it.</p>}
           <div className="row">
             <button onClick={onFocus}>Orbit view</button>
             {editable && <button className="danger" onClick={() => onEdit({ kind: 'removeRoad', id: sel.road.id })}>Remove road</button>}
@@ -162,7 +178,9 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
         <Metric label="Job capacity" value={fmt(proposed.jobs)} d={delta(proposed.jobs, original.jobs)} />
         <Metric label="Floor area" value={`${proposed.floorAreaKm2.toFixed(2)} km²`} d={delta(proposed.floorAreaKm2, original.floorAreaKm2, 2)} />
         <Metric label="Road network" value={`${proposed.roadKm.toFixed(1)} km`} d={delta(proposed.roadKm, original.roadKm, 1)} />
-        <Metric label="Green space" value={`${proposed.greenHa.toFixed(1)} ha`} />
+        <Metric label="Green space" value={`${proposed.greenHa.toFixed(1)} ha`} d={delta(proposed.greenHa, original.greenHa, 1)} />
+        <Metric label="Near transit (400 m)" value={`${Math.round(proposed.transitAccess * 100)}% of residents`} d={delta(proposed.transitAccess * 100, original.transitAccess * 100)} />
+        <Metric label="Near a park (300 m)" value={`${Math.round(proposed.parkAccess * 100)}% of residents`} d={delta(proposed.parkAccess * 100, original.parkAccess * 100)} />
         <Metric label="Buildings" value={fmt(proposed.buildings)} d={delta(proposed.buildings, original.buildings)} />
       </div>
       {comparison && (
@@ -174,7 +192,7 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
                 <tr><th /><th>Today</th>{comparison.map((c) => <th key={c.name} className={c.active ? 'on' : ''}>{c.name}</th>)}</tr>
               </thead>
               <tbody>
-                {([['Housing', (m: CityMetrics) => fmt(m.residents)], ['Jobs', (m: CityMetrics) => fmt(m.jobs)], ['Floor km²', (m: CityMetrics) => m.floorAreaKm2.toFixed(2)], ['Road km', (m: CityMetrics) => m.roadKm.toFixed(1)], ['Buildings', (m: CityMetrics) => fmt(m.buildings)]] as const).map(([label, f]) => (
+                {([['Near transit', (m: CityMetrics) => `${Math.round(m.transitAccess * 100)}%`], ['Near park', (m: CityMetrics) => `${Math.round(m.parkAccess * 100)}%`], ['Housing', (m: CityMetrics) => fmt(m.residents)], ['Jobs', (m: CityMetrics) => fmt(m.jobs)], ['Floor km²', (m: CityMetrics) => m.floorAreaKm2.toFixed(2)], ['Road km', (m: CityMetrics) => m.roadKm.toFixed(1)], ['Buildings', (m: CityMetrics) => fmt(m.buildings)]] as const).map(([label, f]) => (
                   <tr key={label}><th>{label}</th><td>{f(original)}</td>{comparison.map((c) => <td key={c.name} className={c.active ? 'on' : ''}>{f(c.metrics)}</td>)}</tr>
                 ))}
               </tbody>

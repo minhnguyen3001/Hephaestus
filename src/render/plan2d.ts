@@ -97,7 +97,7 @@ export class Plan2D implements WorldRenderer {
   setWorld(world: WorldData, region: RegionProfile) {
     const first = !this.world;
     this.world = world;
-    const sig = world.roads.map((r) => r.id).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
+    const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []);
     if (!this.sim || sig !== this.roadSig || region !== this.region) this.startSim(world, region, 1);
     this.roadSig = sig;
     this.region = region;
