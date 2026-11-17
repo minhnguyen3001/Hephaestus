@@ -333,7 +333,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
             <option value="__ren">Rename…</option>
             {project.scenarios.length > 1 && <option value="__del">Delete this scenario</option>}
           </select>
-          <button className="share" onClick={share} title="Copy a link to this plan">Share</button>
+          <button className="share-btn" onClick={share} title="Copy a link to this plan">Share</button>
           <select value={quality} onChange={(e) => {
             const q = e.target.value as QualitySetting;
             setQuality(q);
