@@ -137,7 +137,8 @@ function noteMarker(text: string, at: THREE.Vector3): THREE.Group {
   g.add(stalk, sprite);
   return g;
 }
-const UNDER = 14; // tunnel depth below ground, meters
+const UNDER = 14; // rail tunnel depth below ground, meters
+const ROAD_TUNNEL = 8; // road tunnel depth
 const SKY_DAY = new THREE.Color(0xa8cbe8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
 const SKY_NIGHT = new THREE.Color(0x0b1322);
@@ -642,6 +643,11 @@ export class Engine implements WorldRenderer {
     });
     this.clearGroup(this.undergroundGroup);
     const tunnels = w.rails.filter((r) => r.tunnel).map((r) => ribbonGeometry(r.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
+    for (const r of w.roads) {
+      if (!r.tunnel || r.kind === 'footway' || r.kind === 'cycleway') continue;
+      const g = ribbonGeometry(r.points, roadWidth(r), (p) => this.hp(p) - ROAD_TUNNEL, new THREE.Color(0x5a6270));
+      if (g) tunnels.push(g);
+    }
     if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
     this.applyXray();
 
@@ -1001,6 +1007,7 @@ export class Engine implements WorldRenderer {
       return;
     }
     for (const a of sim.agents) {
+      if (a.under && !this.layers.underground) continue;
       const slots = this.agentSlots[a.kind];
       if (slots.length < MAX_INSTANCES) slots.push(a);
     }
@@ -1011,7 +1018,7 @@ export class Engine implements WorldRenderer {
       const palette = k === 'taxi' ? [this.region!.taxiColor] : k === 'bus' ? [this.region!.busColor] : PALETTES[k];
       for (let i = 0; i < slots.length; i++) {
         const a = slots[i];
-        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, this.deckH(a.x, a.y) + lift, -a.y);
+        this.tmpM.makeRotationY(Math.atan2(a.hx, -a.hy)).setPosition(a.x, a.under ? this.h(a.x, a.y) - ROAD_TUNNEL + 0.1 : this.deckH(a.x, a.y) + lift, -a.y);
         mesh.setMatrixAt(i, this.tmpM);
         mesh.setColorAt(i, this.tmpC.setHex(a.id === this.followId ? 0x00e5ff : palette[a.id % palette.length]));
       }

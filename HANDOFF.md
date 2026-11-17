@@ -53,7 +53,7 @@ Contract: React owns project, history and view state. It calls `renderer.setWorl
 
 ## Next actions
 1. Parking search and taxi pickup behaviour (P2).
-2. Road tunnels: render in x-ray, and let agents use them (needs a per-agent level in frames).
+2. (done) Road tunnels.
 3. More roof shapes; regional facade palettes.
 4. Public holiday profile; stadium event presets from OSM.
 5. Real-device QA (needs the owner); zero-cost hosting once the owner decides.

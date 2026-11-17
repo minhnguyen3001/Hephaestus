@@ -11,7 +11,7 @@ export type ToWorker =
 export interface Frame {
   t: 'frame';
   time: number;
-  buf: Float32Array; // per agent: id, kind index, x, y, hx, hy
+  buf: Float32Array; // per agent: id, kind index, x, y, hx, hy, in-tunnel flag
   trains: TrainCar[];
   stats: SimStats;
   watched: AgentInfo | null;
@@ -34,9 +34,10 @@ export interface AgentView {
   y: number;
   hx: number;
   hy: number;
+  under: boolean;
 }
 
-export const STRIDE = 6;
+export const STRIDE = 7;
 
 export function encodeFrame(sim: Simulation, watched: number | null, withSpeeds = false): Frame {
   const buf = new Float32Array(sim.agents.length * STRIDE);
@@ -48,6 +49,7 @@ export function encodeFrame(sim: Simulation, watched: number | null, withSpeeds 
     buf[o + 3] = a.y;
     buf[o + 4] = a.hx;
     buf[o + 5] = a.hy;
+    buf[o + 6] = a.under ? 1 : 0;
   });
   return { t: 'frame', time: sim.time, buf, trains: sim.trainCars(), stats: sim.stats(), watched: watched === null ? null : sim.describe(watched), speeds: withSpeeds ? sim.roadSpeeds() : undefined };
 }
@@ -55,7 +57,7 @@ export function encodeFrame(sim: Simulation, watched: number | null, withSpeeds 
 export function decodeAgents(buf: Float32Array): AgentView[] {
   const out: AgentView[] = [];
   for (let o = 0; o < buf.length; o += STRIDE) {
-    out.push({ id: buf[o], kind: AGENT_KINDS[buf[o + 1]], x: buf[o + 2], y: buf[o + 3], hx: buf[o + 4], hy: buf[o + 5] });
+    out.push({ id: buf[o], kind: AGENT_KINDS[buf[o + 1]], x: buf[o + 2], y: buf[o + 3], hx: buf[o + 4], hy: buf[o + 5], under: buf[o + 6] > 0 });
   }
   return out;
 }

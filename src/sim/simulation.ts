@@ -33,6 +33,7 @@ export interface Agent {
   y: number;
   hx: number;
   hy: number;
+  under: boolean; // inside a road tunnel
 }
 
 interface Site {
@@ -675,7 +676,7 @@ export class Simulation {
     return {
       id: this.nextId++, kind, purpose, path, pi: 0, s: 0, v: 0, vmax,
       len: veh?.len ?? (kind === 'bicycle' ? 1.8 : 0.5),
-      side: this.rand() < 0.5 ? 1 : -1, dwell: 0, stopped: 0, done: false, x: 0, y: 0, hx: 1, hy: 0,
+      side: this.rand() < 0.5 ? 1 : -1, dwell: 0, stopped: 0, done: false, x: 0, y: 0, hx: 1, hy: 0, under: false,
     };
   }
 
@@ -1131,6 +1132,7 @@ export class Simulation {
       a.y = p[1] + e.dir[1] * s - e.dir[0] * off;
       a.hx = e.dir[0];
       a.hy = e.dir[1];
+      a.under = e.tunnel;
     }
   }
 

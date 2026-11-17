@@ -557,6 +557,7 @@ export class Plan2D implements WorldRenderer {
     const ctx = this.ctx;
     const sim = this.sim!;
     for (const a of sim.agents) {
+      if (a.under && !this.layers.underground) continue;
       const [wd, ln] = AGENT_SIZE[a.kind];
       const color = a.id === this.followId ? 0x00e5ff : a.kind === 'emergency' ? (Math.floor(performance.now() / 250) % 2 ? 0xff2020 : 0x2060ff) : a.kind === 'taxi' ? this.region!.taxiColor : a.kind === 'bus' ? this.region!.busColor : AGENT_COLORS[a.kind];
       ctx.fillStyle = hex(color);

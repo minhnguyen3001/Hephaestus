@@ -333,6 +333,18 @@ describe('bike lanes', () => {
   });
 });
 
+describe('road tunnels', () => {
+  it('carry traffic but never serve as trip endpoints', () => {
+    const w = gridFixture();
+    w.roads.push({ id: 'tun', nodes: ['n1', 'tmid', 'n45'], points: [[-200, -200], [0, -250], [200, 200]], kind: 'primary', lanes: 2, oneway: false, maxspeedKmh: 50, tunnel: true, origin: 'real' });
+    const g = RoadGraph.build(w.roads);
+    const mid = g.index.get('tmid')!;
+    expect(g.nearestNode([0, -250], 'car')).not.toBe(mid);
+    expect(g.edges.some((e) => e.tunnel && e.car)).toBe(true);
+    expect(g.edges.filter((e) => e.tunnel).every((e) => !e.walk)).toBe(true);
+  });
+});
+
 describe('zoning', () => {
   it('fills a zone with buildings clear of streets, and makes parks', () => {
     const base = gridFixture();

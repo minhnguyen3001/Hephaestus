@@ -24,6 +24,7 @@ export interface GEdge {
   oneway: boolean;
   /** Route-cost multiplier for cyclists: bike lanes and cycleways are preferred, busy roads avoided. */
   bikeCost: number;
+  tunnel: boolean;
 }
 
 const CAR_KINDS = new Set<RoadKind>(['highway', 'primary', 'secondary', 'tertiary', 'residential', 'service']);
@@ -83,7 +84,7 @@ export class RoadGraph {
   static build(roads: Road[]): RoadGraph {
     const g = new RoadGraph();
     for (const r of roads) {
-      if (r.tunnel) continue; // tunnels aren't rendered yet, so keep agents off them too
+      if (r.tunnel && (r.kind === 'footway' || r.kind === 'cycleway')) continue; // pedestrian subways: skip
       const car = CAR_KINDS.has(r.kind);
       const walk = r.kind !== 'highway';
       const speed = r.maxspeedKmh / 3.6;
@@ -101,8 +102,8 @@ export class RoadGraph {
         const b = g.index.get(r.nodes[i])!;
         const len = dist(g.nodes[a].p, g.nodes[b].p);
         if (len < 0.01) continue;
-        g.addEdge({ from: a, to: b, len, speed, car, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost });
-        g.addEdge({ from: b, to: a, len, speed, car: car && !r.oneway, walk, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost });
+        g.addEdge({ from: a, to: b, len, speed, car, walk: walk && !r.tunnel, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost, tunnel: !!r.tunnel });
+        g.addEdge({ from: b, to: a, len, speed, car: car && !r.oneway, walk: walk && !r.tunnel, lanes: dirLanes, roadId: r.id, kind: r.kind, halfWidth, oneway: r.oneway, bikeCost, tunnel: !!r.tunnel });
       }
     }
     for (const mode of ['car', 'walk'] as const) {
@@ -110,7 +111,8 @@ export class RoadGraph {
       // (which would make every route from it fail after an expensive search).
       const main = g.largestComponent(mode);
       g.nodes.forEach((n, i) => {
-        if (!main.has(i) || !n.out.some((e) => g.edges[e][mode])) return;
+        // trips start and end on surface streets, never inside a tunnel
+        if (!main.has(i) || !n.out.some((e) => g.edges[e][mode] && !g.edges[e].tunnel)) return;
         const key = g.cellKey(n.p);
         const arr = g.grids[mode].get(key) ?? [];
         arr.push(i);
