@@ -71,6 +71,8 @@ export interface EngineCallbacks {
   onPerf(p: Perf): void;
   onHint(msg: string | null): void;
   onPlaceEvent?(p: Vec2): void;
+  /** The GPU dropped our WebGL context (memory pressure, driver reset). The UI should rebuild, lighter. */
+  onContextLost?(): void;
 }
 
 export interface Layers {
@@ -312,6 +314,7 @@ export class Engine implements WorldRenderer {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
     this.resize();
+    canvas.addEventListener('webglcontextlost', this.onContextLost);
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('pointermove', this.onPointerMove);
@@ -425,6 +428,7 @@ export class Engine implements WorldRenderer {
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     const c = this.renderer.domElement;
+    c.removeEventListener('webglcontextlost', this.onContextLost);
     c.removeEventListener('pointerdown', this.onPointerDown);
     c.removeEventListener('pointerup', this.onPointerUp);
     c.removeEventListener('pointermove', this.onPointerMove);
@@ -457,7 +461,17 @@ export class Engine implements WorldRenderer {
           '#include <color_fragment>',
           `#include <color_fragment>
           float gLit = 0.0;
-          if (vWall > 0.5 && vFacade.y > 2.8) {
+          if (vWall > 1.5 && vWall < 2.5) {
+            // glass curtain wall: tinted glass, thin mullions, floor bands
+            vec2 cell = vec2(vFacade.x / 1.6, vFacade.y / 3.6);
+            vec2 f = fract(cell);
+            float fade = 1.0 - smoothstep(0.25, 0.7, max(fwidth(cell.x), fwidth(cell.y)));
+            float mull = max(step(0.92, f.x), step(0.9, f.y)) * fade;
+            vec3 glass = mix(vec3(0.32, 0.44, 0.56), vec3(0.62, 0.74, 0.84), smoothstep(0.0, 140.0, vFacade.y));
+            diffuseColor.rgb = mix(mix(diffuseColor.rgb, glass, 0.72), vec3(0.82, 0.85, 0.88), mull * 0.6);
+            float r = fract(sin(dot(floor(cell * vec2(0.5, 1.0)) + vColor.rg * 97.0, vec2(12.9898, 78.233))) * 43758.5453);
+            gLit = (1.0 - mull) * step(0.45, r) * 0.8;
+          } else if (vWall > 0.5 && vWall < 1.5 && vFacade.y > 2.8) {
             vec2 cell = vec2(vFacade.x / 3.4, (vFacade.y - 0.8) / 3.2);
             vec2 f = fract(cell);
             float rawWin = step(0.2, f.x) * step(f.x, 0.8) * step(0.3, f.y) * step(f.y, 0.85);
@@ -1175,6 +1189,13 @@ export class Engine implements WorldRenderer {
   }
 
   // ---------- input ----------
+
+  private onContextLost = (e: Event) => {
+    e.preventDefault();
+    cancelAnimationFrame(this.raf);
+    this.disposed = true;
+    this.cb.onContextLost?.();
+  };
 
   private onPointerDown = (e: PointerEvent) => {
     this.down = { x: e.clientX, y: e.clientY, t: performance.now() };

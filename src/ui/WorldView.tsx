@@ -143,6 +143,10 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       onStats: setStats,
       onPerf: setPerf,
       onHint: setHint,
+      onContextLost: () => {
+        setHint('The graphics device was reset, so the city was rebuilt at Low quality. You can raise it again in Graphics.');
+        setQuality((q) => (q === 'low' ? 'medium' : 'low')); // forces a fresh renderer
+      },
       onPlaceEvent: (p: Vec2) => {
         const now = statsRef.current?.time ?? 7.5 * 3600;
         const start = Math.ceil((now + 3600) / 900) * 900 % 86400;

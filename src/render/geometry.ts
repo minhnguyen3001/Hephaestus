@@ -35,6 +35,8 @@ export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THR
   const wall: number[] = [];
   const fac: number[] = [];
   const roof = color.clone().multiplyScalar(0.82);
+  // facade style: 1 punched windows, 2 glass curtain wall (towers), 3 blank (industrial, parking)
+  const style = b.height > 40 && (b.use === 'office' || b.height > 70) ? 2 : b.use === 'industrial' || b.use === 'parking' ? 3 : 1;
   let u = 0;
   for (let i = 0; i < pts.length; i++) {
     const [x1, y1] = pts[i];
@@ -49,7 +51,7 @@ export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THR
       pos.push(...p);
       nrm.push(nx, 0, nz);
       col.push(color.r, color.g, color.b);
-      wall.push(1);
+      wall.push(style);
       fac.push(...f);
     }
     u += len;

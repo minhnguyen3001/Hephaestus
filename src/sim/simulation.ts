@@ -738,60 +738,55 @@ export class Simulation {
     }
   }
 
-  private planTransit(o: Site, d: Site): { first: Leg; next?: Leg } | null {
-    const MAX = 700;
-    const direct = this.planDirect(o, d);
-    if (direct) return { first: direct };
-    // One transfer: line A to a stop within 150 m of a stop on line B, which reaches near the destination.
+  /** Best ride from each stop to every reachable stop (direct, or with one transfer within 150 m). Built once. */
+  private reach?: Map<number, Map<number, { first: Leg; next?: Leg }>>;
+
+  private buildReach() {
     const TRANSFER = 150;
-    let best: { first: Leg; next: Leg } | null = null;
-    let bestCost = dist(o.c, d.c) * 0.8;
-    const origins = this.stops.filter((s) => dist(o.c, s.p) <= MAX);
-    const dests = new Set(this.stops.filter((s) => dist(s.p, d.c) <= MAX).map((s) => s.id));
-    if (!origins.length || !dests.size) return null;
-    for (const a of origins) {
-      const wa = dist(o.c, a.p);
-      for (const r1 of this.ridesFrom(a.id)) {
-        const t1 = this.stops[r1.to];
-        for (const t2 of this.stops) {
-          if (dist(t1.p, t2.p) > TRANSFER) continue;
-          for (const r2 of this.ridesFrom(t2.id)) {
-            if (r2.line === r1.line || !dests.has(r2.to)) continue;
-            const cost = wa + dist(this.stops[r2.to].p, d.c) + 300; // transfer penalty
-            if (cost < bestCost) {
-              bestCost = cost;
-              best = { first: { line: r1.line, dir: r1.dir, from: a.id, to: t1.id }, next: { line: r2.line, dir: r2.dir, from: t2.id, to: r2.to } };
-            }
+    const near = new Map<number, number[]>();
+    for (const a of this.stops) near.set(a.id, this.stops.filter((b) => dist(a.p, b.p) <= TRANSFER).map((b) => b.id));
+    const reach = new Map<number, Map<number, { first: Leg; next?: Leg }>>();
+    for (const a of this.stops) {
+      const m = new Map<number, { first: Leg; next?: Leg }>();
+      const direct: Leg[] = [];
+      for (const r of this.ridesFrom(a.id)) {
+        if (!m.has(r.to)) {
+          const leg = { line: r.line, dir: r.dir, from: a.id, to: r.to };
+          m.set(r.to, { first: leg });
+          direct.push(leg);
+        }
+      }
+      for (const leg of direct) {
+        for (const t2 of near.get(leg.to) ?? []) {
+          for (const r2 of this.ridesFrom(t2)) {
+            if (r2.line === leg.line || m.has(r2.to)) continue;
+            m.set(r2.to, { first: leg, next: { line: r2.line, dir: r2.dir, from: t2, to: r2.to } });
           }
         }
       }
+      reach.set(a.id, m);
     }
-    return best;
+    this.reach = reach;
   }
 
-  private planDirect(o: Site, d: Site): Leg | null {
+  private planTransit(o: Site, d: Site): { first: Leg; next?: Leg } | null {
     const MAX = 700;
-    let best: Leg | null = null;
+    this.reach ??= (this.buildReach(), this.reach);
+    const origins = this.stops.filter((s) => dist(o.c, s.p) <= MAX);
+    if (!origins.length) return null;
+    const dests = this.stops.filter((s) => dist(s.p, d.c) <= MAX);
+    let best: { first: Leg; next?: Leg } | null = null;
     let bestCost = dist(o.c, d.c) * 0.8; // must beat walking most of the way
-    for (const a of this.stops) {
+    for (const a of origins) {
+      const m = this.reach!.get(a.id)!;
       const wa = dist(o.c, a.p);
-      if (wa > MAX) continue;
-      for (const li of a.lines) {
-        const line = this.transit[li];
-        for (const dir of [0, 1] as const) {
-          const seq = line.stopSeq[dir];
-          const i = seq.indexOf(a.id);
-          if (i < 0) continue;
-          for (let j = i + 1; j < seq.length; j++) {
-            const b = this.stops[seq[j]];
-            const wb = dist(b.p, d.c);
-            if (wb > MAX) continue;
-            const cost = wa + wb;
-            if (cost < bestCost) {
-              bestCost = cost;
-              best = { line: li, dir, from: a.id, to: b.id };
-            }
-          }
+      for (const b of dests) {
+        const plan = m.get(b.id);
+        if (!plan) continue;
+        const cost = wa + dist(b.p, d.c) + (plan.next ? 300 : 0);
+        if (cost < bestCost) {
+          bestCost = cost;
+          best = plan;
         }
       }
     }
