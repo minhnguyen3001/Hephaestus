@@ -10,9 +10,9 @@ Last updated: 2026-11-17 (session 1, later). The owner runs this project autonom
 
 ## Project state
 A broad, working product. A user can:
-- Search or pick a featured city. Packs exist for Shibuya, Manhattan, SF Nob Hill, HK Central, City of London, Chicago Loop and Saigon D1; Amsterdam is in progress. Other places load live from free Overpass.
+- Search or pick a featured city. All 8 featured cities have packs, including stations, trees and bike-lane tags. Other places load live from free Overpass.
 - Explore real 3D: terrain, sea from coastlines, relations, trees, pitched roofs, bridge decks, an underground x-ray, and weather. Or use the 2D plan view.
-- Edit the plan: buildings, roads (which form intersections), the road properties editor, zoning, bus and elevated metro lines, and note pins. Multiple scenarios with comparison. Undo/redo, autosave, share links (`#plan=`).
+- Edit the plan: buildings, roads (which form intersections), the road editor (lanes, speed, one-way, bike lanes, pedestrian streets), zoning, bus and elevated metro lines, note pins, and event crowds (simulation condition). Multiple scenarios with comparison. Undo/redo, autosave, share links (`#plan=`).
 - Watch the simulation, which runs in a worker:
   - OD trips and regional modes.
   - Lanes, signals (with pedestrians obeying them) and spill-back.
@@ -46,18 +46,19 @@ Contract: React owns project, history and view state. It calls `renderer.setWorl
 - Workflow: commit on `main` (or a short-lived branch, fast-forwarded), push immediately.
 
 ## Testing state
-- `npm test`: 35/35 passing.
+- `npm test`: 37/37 passing.
 - `npx playwright test`: about 19 scenarios in `e2e/smoke.spec.ts` plus `e2e/mobile.spec.ts`; all passing at last run. Some use live station and terrain queries (fast). Live-only cities can time out when public servers are busy.
 - `npx playwright test e2e/perf.spec.ts`: throttled benchmark → `test-results/perf.json` (see docs/PERFORMANCE.md).
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader runs at about 1–15 fps, which says nothing about real GPU performance.
 
 ## Next actions
-1. Finish the Amsterdam pack. Optionally rebuild older packs so they include stations and trees (live fallback works meanwhile).
-2. Geometry build in a worker (faster time to ready; 6–14 s under 4× throttle).
-3. Parking and taxi pickup; special events (concert/stadium surges).
-4. Facade variety by region; road tunnels.
-5. Real-device QA notes (needs the owner or real hardware).
-6. Zero-cost hosting once the owner decides (public repo + GitHub Pages, or a free static host).
+1. Parking search and taxi pickup behaviour (P2).
+2. Road tunnels: render in x-ray, and let agents use them (needs a per-agent level in frames).
+3. More roof shapes; regional facade palettes.
+4. Public holiday profile; stadium event presets from OSM.
+5. Real-device QA (needs the owner); zero-cost hosting once the owner decides.
+
+Dev tools: `scripts/profile-load.ts` (load stages), `scripts/profile-sim.ts` (simulation ticks), `e2e/perf.spec.ts` (throttled benchmark).
 
 ## Owner decisions
 - Approved: the master brief; **zero cost**; **automatic GitHub operations**; continuous autonomous work.

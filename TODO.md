@@ -11,20 +11,18 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [ ] Product name: keep "Global City Simulator", or adopt "Hephaestus" or another brand.
 
 ## P0
-- [ ] Amsterdam pack (building). Rebuild older packs to include stations and trees (live fallback works meanwhile)
 - [ ] Real-device QA (old Windows laptop with integrated GPU, iPad, Android phone, Safari). Note: 3D High in headless SwiftShader costs ~150 ms/frame; verify on real GPUs
 
 ## P1
-- [ ] Bike lanes in the road editor
 - [ ] Transit: real GTFS where free feeds exist; line headway editing; route colours from OSM relations
 
 ## P2
-- [ ] Facade variety by region; more roof shapes (hipped, flat with parapets)
+- [ ] More roof shapes (hipped, flat with parapets); regional facade palettes
 - [ ] Road tunnels (currently hidden)
 - [ ] Larger areas: tiled loading around the camera (now: "load the city here" opens a new area)
 - [ ] ~~Geometry build in a worker~~ not needed: profiling (`scripts/profile-load.ts`) shows the full data pipeline is ~160 ms; terrain no longer blocks first render
 - [ ] Parking, taxis picking up and dropping off
-- [ ] Special events (concert/stadium surges); public holiday profile
+- [ ] Public holiday demand profile; auto-detect stadiums from OSM for event presets
 - [ ] Network-based walk isochrones (current access metrics use straight-line distance)
 - [ ] Grow the pack pipeline: GitHub Action (free minutes) to rebuild packs on a schedule
 
@@ -60,4 +58,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - [x] Performance doc with throttled measurements (main thread 0.8 ms/frame in 2D, 1.4 ms in 3D Low)
 - [x] Emergency vehicles; transit transfers; real OSM rail/subway lines with stations and riders
 - [x] Planning challenges; rule-based advisor with fly-to; note pins (travel in share links); weather
-- [x] 35 unit tests; ~19 e2e scenarios + phone layout + perf benchmark
+- [x] All 8 featured cities packed (with stations, trees, bike-lane tags)
+- [x] Bike lanes (OSM + editor + routing + mode effect); event crowds; glass curtain-wall towers
+- [x] WebGL context-loss recovery; precomputed transit reachability; profiling scripts (scripts/profile-load.ts, scripts/profile-sim.ts)
+- [x] 37 unit tests; ~21 e2e scenarios + phone layout + perf benchmark
