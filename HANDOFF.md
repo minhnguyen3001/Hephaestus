@@ -32,6 +32,12 @@ Not built: any backend (accounts, cloud save, real-time collaboration). It's def
 - The scene is chunked (~300 m) and incremental. Picking culls by chunk, and ground picking steps through the heightfield. Edits apply in about 60 ms under 4× throttle.
 - Terrain tiles are decoded without colour management (this fixed the spike artefacts) and despiked.
 
+## City ring and detail (2026-11-17)
+- The product is named **Ptah**. The repo and URL are still `Hephaestus` (Pages base `/Hephaestus/`).
+- 10 km view: `src/geo/vectortiles.ts` loads OpenFreeMap z14 vector tiles out to `PRESETS[q].ring` (3/4/5 km). The engine draws them in `setContext`/`buildContextTile`, hidden where the detail zone exists (`inDetail`).
+- Scene building is time-sliced through `Engine.work` (`runWork`, 6–10 ms per frame, nearest first). The status bar shows "building scene…".
+- Detail: street furniture (lights, sidewalks), rooftop units, crosswalks and the shopfront facade style (`aWall` = 4). Furniture draws only near the camera (`nearDetail` in `cullChunks`).
+
 ## Technical map
 | Area | Files |
 | --- | --- |
