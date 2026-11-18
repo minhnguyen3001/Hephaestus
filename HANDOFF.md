@@ -1,6 +1,6 @@
 # HANDOFF: read this first
 
-**Live:** https://minhnguyen3001.github.io/Hephaestus/. It deploys automatically from `main` with `.github/workflows/pages.yml`; the first successful deploy was on 2026-11-17.
+**Live:** https://minhnguyen3001.github.io/Ptah/. It deploys automatically from `main` with `.github/workflows/pages.yml`; the first successful deploy was on 2026-11-17.
 
 Last updated: 2026-11-17 (session 1, later). The owner runs this project autonomously: **zero cost**, **GitHub on autopilot** (commit, push and merge to `main` without asking), keep working through TODO.md.
 
@@ -33,7 +33,7 @@ Not built: any backend (accounts, cloud save, real-time collaboration). It's def
 - Terrain tiles are decoded without colour management (this fixed the spike artefacts) and despiked.
 
 ## City ring and detail (2026-11-17)
-- The product is named **Ptah**. The repo and URL are still `Hephaestus` (Pages base `/Hephaestus/`).
+- The product, repo and URL are all named **Ptah** (Pages base `/Ptah/`).
 - 10 km view: `src/geo/vectortiles.ts` loads OpenFreeMap z14 vector tiles out to `PRESETS[q].ring` (3/4/5 km). The engine draws them in `setContext`/`buildContextTile`, hidden where the detail zone exists (`inDetail`).
 - Scene building is time-sliced through `Engine.work` (`runWork`, 6–10 ms per frame, nearest first). The status bar shows "building scene…".
 - Detail: street furniture (lights, sidewalks), rooftop units, crosswalks and the shopfront facade style (`aWall` = 4). Furniture draws only near the camera (`nearDetail` in `cullChunks`).
@@ -56,7 +56,7 @@ Not built: any backend (accounts, cloud save, real-time collaboration). It's def
 Contract: React owns project, history and view state. It calls `renderer.setWorld(world, region)`, and renderers report through `EngineCallbacks`. Renderers rebuild the simulation only when roads, region or transit lines change.
 
 ## Git state
-- Single branch `main` on origin (github.com/minhnguyen3001/Hephaestus, **private**). Everything is pushed after each feature.
+- Single branch `main` on origin (github.com/minhnguyen3001/Ptah, **private**). Everything is pushed after each feature.
 - Workflow: commit on `main` (or a short-lived branch, fast-forwarded), push immediately.
 
 ## Testing state
@@ -76,5 +76,5 @@ Dev tools: `scripts/profile-load.ts` (load stages), `scripts/profile-sim.ts` (si
 
 ## Owner decisions
 - Approved: the master brief; **zero cost**; **automatic GitHub operations**; continuous autonomous work.
-- Decided: product name **Ptah**. The repo is public and deploys to GitHub Pages (`.github/workflows/pages.yml`, base `/Hephaestus/`).
+- Decided: product name **Ptah**. The repo is public and deploys to GitHub Pages (`.github/workflows/pages.yml`, base `/Ptah/`).
 - Constraints: no paid services; label estimated and synthetic data; no force-push or history rewrite.

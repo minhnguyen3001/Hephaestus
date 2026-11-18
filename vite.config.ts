@@ -2,8 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => ({
-  // GitHub Pages serves the app from /Hephaestus/ (`--mode pages`); local dev and preview stay at /.
-  base: mode === 'pages' ? '/Hephaestus/' : '/',
+  // GitHub Pages serves the app from /Ptah/ (`--mode pages`); local dev and preview stay at /.
+  base: mode === 'pages' ? '/Ptah/' : '/',
   plugins: [react()],
   build: {
     target: 'es2020',

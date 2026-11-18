@@ -1,8 +1,6 @@
 # Ptah
 
-*Repository and web address keep the earlier name: `Hephaestus`.*
-
-**Live demo:** https://minhnguyen3001.github.io/Hephaestus/
+**Live demo:** https://minhnguyen3001.github.io/Ptah/
 
 A browser-based 3D city-building and urban-planning simulator built on **real-world geography**. Search almost any place on Earth, explore its actual streets and buildings in 3D, redesign them, and watch a living simulation of synthetic people, cars, motorbikes, buses and trains respond.
 
@@ -95,7 +93,7 @@ The simulation is fully separate from rendering, so it can move to a Web Worker 
 
 ## Deployment
 
-Every push to `main` builds and deploys to **GitHub Pages** for free, using `.github/workflows/pages.yml`. The production build uses the base path `/Hephaestus/`. To build the same thing locally, run `npm run build:pages`.
+Every push to `main` builds and deploys to **GitHub Pages** for free, using `.github/workflows/pages.yml`. The production build uses the base path `/Ptah/`. To build the same thing locally, run `npm run build:pages`.
 
 ## Contributing
 
