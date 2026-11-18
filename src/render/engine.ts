@@ -7,6 +7,8 @@ import { treePoints } from '../geo/trees';
 import { centroid, dist } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { SavedView } from '../project/store';
+import { CONTEXT_RADIUS, type ContextTile } from '../geo/vectortiles';
+import { TILE } from '../geo/osm';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { SimClient } from '../sim/client';
@@ -21,7 +23,7 @@ import { ZONE_COLORS } from './palette';
 import { ROAD_COLORS } from './palette';
 
 export type { Tool };
-export type CameraMode = 'aerial' | 'neighborhood' | 'street' | 'inspect';
+export type CameraMode = 'city' | 'aerial' | 'neighborhood' | 'street' | 'inspect';
 
 
 export type Selection =
@@ -58,10 +60,31 @@ export interface WorldRenderer {
   setLineMode(m: 'bus' | 'metro'): void;
   getView(): SavedView;
   setView(v: SavedView): void;
+  setContext(tiles: ContextTile[], detail: DetailZone): void;
   setSimParams(p: SimParams): void;
   lookAt(p: Vec2): void;
   roadSpeeds(): Map<string, number>;
   dispose(): void;
+}
+
+/** Where full-detail data exists (the city ring is hidden there): the initial circle plus loaded 1 km tiles. */
+export interface DetailZone {
+  radius: number;
+  tiles: string[];
+}
+
+export function inDetail(z: DetailZone, p: Vec2): boolean {
+  if (p[0] * p[0] + p[1] * p[1] < z.radius * z.radius) return true;
+  return z.tiles.includes(`${Math.round(p[0] / TILE)},${Math.round(p[1] / TILE)}`);
+}
+
+/** Detail tiles that overlap a city-ring tile (so a ring tile only rebuilds when its own overlap changes). */
+export function overlapSig(z: DetailZone, c: Vec2): string {
+  const near = z.tiles.filter((k) => {
+    const [i, j] = k.split(',').map(Number);
+    return Math.abs(i * TILE - c[0]) < 1600 && Math.abs(j * TILE - c[1]) < 1600;
+  });
+  return `${z.radius}|${near.sort().join(';')}`;
 }
 
 export interface EngineCallbacks {
@@ -271,7 +294,7 @@ export class Engine implements WorldRenderer {
     this.camera.position.set(-500, 600, 700);
     this.controls = new OrbitControls(this.camera, canvas);
     Object.assign(this.controls, {
-      enableDamping: true, dampingFactor: 0.08, maxPolarAngle: Math.PI * 0.495, minDistance: 3, maxDistance: 7000,
+      enableDamping: true, dampingFactor: 0.08, maxPolarAngle: Math.PI * 0.495, minDistance: 3, maxDistance: 16000,
       screenSpacePanning: false, zoomToCursor: true, rotateSpeed: 0.6, zoomSpeed: 1.2,
     });
     this.controls.addEventListener('start', () => {
@@ -392,7 +415,8 @@ export class Engine implements WorldRenderer {
     const t = this.controls.target.clone();
     const r = this.world?.radius ?? 600;
     const g = this.h(t.x, -t.z);
-    if (mode === 'aerial') this.flyTo(new THREE.Vector3(0, this.h(0, 0), 0), r * 2.1, 0.55, instant);
+    if (mode === 'city') this.flyTo(new THREE.Vector3(0, this.h(0, 0), 0), CONTEXT_RADIUS * 2.2, 0.75, instant);
+    else if (mode === 'aerial') this.flyTo(new THREE.Vector3(0, this.h(0, 0), 0), r * 2.1, 0.55, instant);
     else if (mode === 'neighborhood') this.flyTo(new THREE.Vector3(t.x, g, t.z), Math.min(420, r), 0.95, instant);
     else if (mode === 'street') this.flyTo(new THREE.Vector3(t.x, g + 1.7, t.z), 14, 1.48, instant);
     else this.focusSelected();
@@ -573,7 +597,9 @@ export class Engine implements WorldRenderer {
     if (ground) {
       if (t) {
         // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
-        const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, t.n - 1, t.n - 1).rotateX(-Math.PI / 2);
+        // ground resolution follows quality (the heightfield itself is finer; vertices sample it)
+        const seg = Math.min(t.n - 1, { low: 110, medium: 180, high: 300 }[q]);
+        const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, seg, seg).rotateX(-Math.PI / 2);
         const pos = g.attributes.position;
         const cols: number[] = [];
         const inner = new THREE.Color(0xe6e0d3);
@@ -999,14 +1025,83 @@ export class Engine implements WorldRenderer {
     if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }
 
+  // ---------- city ring (context tiles) ----------
+  private ctxTiles = new Map<string, { sig: string; group: THREE.Group }>();
+  private ctxMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+
+  setContext(tiles: ContextTile[], detail: DetailZone) {
+    const keep = new Set(tiles.map((t) => t.key));
+    for (const [k, c] of this.ctxTiles) {
+      if (keep.has(k)) continue;
+      this.clearGroup(c.group);
+      this.scene.remove(c.group);
+      this.ctxTiles.delete(k);
+    }
+    const lift = this.lift;
+    const terrainSig = this.world?.terrain ? 't' : 'f';
+    for (const t of tiles) {
+      const sig = overlapSig(detail, t.center) + terrainSig;
+      const cur = this.ctxTiles.get(t.key);
+      if (cur?.sig === sig) continue;
+      if (cur) {
+        this.clearGroup(cur.group);
+        this.scene.remove(cur.group);
+      }
+      const g = new THREE.Group();
+      const outside = (p: Vec2) => !inDetail(detail, p);
+      // buildings: same facade shader as detailed ones, neutral palette, no shadows (cheap)
+      const bgeoms: THREE.BufferGeometry[] = [];
+      for (const b of t.buildings) {
+        const c = centroid(b.ring);
+        if (!outside(c)) continue;
+        const fake: Building = { id: `${t.key}:${c[0] | 0}:${c[1] | 0}`, footprint: b.ring, height: b.height, heightSource: 'osm-height', use: b.height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real' };
+        let base = Infinity;
+        for (const p of b.ring) base = Math.min(base, this.hp(p));
+        bgeoms.push(buildingGeometry(fake, buildingColor(fake, { highlightEstimated: false }), base));
+      }
+      if (bgeoms.length) g.add(new THREE.Mesh(mergeGeometries(bgeoms)!, this.buildingMat));
+      bgeoms.forEach((x) => x.dispose());
+      const flat: THREE.BufferGeometry[] = [];
+      for (const w of t.water) {
+        if (!outside(centroid(w))) continue;
+        const pg = polygonGeometry(w, (p) => this.hp(p) + lift + 0.04, new THREE.Color(0x6fa6d0));
+        if (pg) flat.push(pg);
+      }
+      for (const gr of t.green) {
+        if (!outside(centroid(gr))) continue;
+        const pg = polygonGeometry(gr, (p) => this.hp(p) + lift + 0.05, new THREE.Color(0xa6c98c));
+        if (pg) flat.push(pg);
+      }
+      for (const r of t.roads) {
+        if (!outside(r.points[0]) && !outside(r.points[r.points.length - 1])) continue;
+        const rg = ribbonGeometry(r.points, roadWidth({ kind: r.kind, lanes: r.kind === 'highway' ? 4 : r.kind === 'service' ? 1 : 2 }), (p) => this.hp(p) + lift + ROAD_Y[r.kind], new THREE.Color(ROAD_COLORS[r.kind]));
+        if (rg) flat.push(rg);
+      }
+      if (flat.length) g.add(new THREE.Mesh(mergeGeometries(flat)!, this.ctxMat));
+      flat.forEach((x) => x.dispose());
+      g.userData.ctx = true;
+      this.scene.add(g);
+      this.ctxTiles.set(t.key, { sig, group: g });
+    }
+  }
+
   private cullT = 0;
   /** Hide building and road chunks far from the camera, so big cities stay light on low-end GPUs. */
   private cullChunks(dt: number) {
     this.cullT += dt;
     if (this.cullT < 0.4) return;
     this.cullT = 0;
-    const far = { low: 1800, medium: 3000, high: 4500 }[this.quality];
+    // the detailed zone is small, so it stays visible as far as the city ring (no hole when zoomed out)
+    const farCtx = { low: 4500, medium: 7000, high: 11000 }[this.quality];
+    const far = farCtx;
     const cam = this.camera.position;
+    for (const c of this.ctxTiles.values()) {
+      for (const m of c.group.children as THREE.Mesh[]) {
+        if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+        const bs = m.geometry.boundingSphere!;
+        m.visible = cam.distanceTo(bs.center) - bs.radius < farCtx;
+      }
+    }
     for (const store of [this.buildingChunks, this.roadChunks]) {
       for (const c of store.values()) {
         const g = c.pick.mesh.geometry;
@@ -1245,8 +1340,9 @@ export class Engine implements WorldRenderer {
     // Haze starts beyond what the camera is looking at, so aerial views stay crisp.
     const d = this.camera.position.distanceTo(this.controls.target);
     const haze = this.weather === 'fog' ? 0.12 : this.weather === 'clear' ? 1 : 0.45;
-    fog.near = (d + (this.world?.radius ?? 600) * 1.2) * haze;
-    fog.far = fog.near + (this.world?.radius ?? 600) * 6 * haze;
+    const span = Math.max(this.world?.radius ?? 600, CONTEXT_RADIUS * 0.6);
+    fog.near = (d + span * 1.2) * haze;
+    fog.far = fog.near + span * 4 * haze;
     this.sun.intensity *= this.weather === 'clear' ? 1 : 0.55;
   }
 

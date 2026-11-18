@@ -15,7 +15,7 @@ export interface Terrain {
 }
 
 export const TERRARIUM_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
-const ZOOM = 14;
+const ZOOM = 14; // default; wide areas use z13 (fewer tiles, still ~20 m pixels)
 
 export function lonLatToTile(lon: number, lat: number, z: number): [number, number] {
   const s = 2 ** z;
@@ -65,8 +65,8 @@ export function buildTerrain(center: LatLon, extent: number, n: number, elevatio
   return { n, extent, heights, min, max };
 }
 
-async function loadTile(x: number, y: number, signal?: AbortSignal): Promise<ImageData> {
-  const url = `${TERRARIUM_URL}/${ZOOM}/${x}/${y}.png`;
+async function loadTile(z: number, x: number, y: number, signal?: AbortSignal): Promise<ImageData> {
+  const url = `${TERRARIUM_URL}/${z}/${x}/${y}.png`;
   const cache = typeof caches !== 'undefined' ? await caches.open('gcs-dem-v1').catch(() => null) : null;
   let res = cache ? await cache.match(url) : undefined;
   if (!res) {
@@ -87,23 +87,24 @@ async function loadTile(x: number, y: number, signal?: AbortSignal): Promise<Ima
 export async function fetchTerrain(center: LatLon, radius: number, signal?: AbortSignal): Promise<Terrain | undefined> {
   try {
     const extent = radius * 1.35;
+    const Z = extent > 3000 ? 13 : ZOOM;
     const proj = makeProjection(center);
     const sw = proj.toLatLon([-extent, -extent]);
     const ne = proj.toLatLon([extent, extent]);
-    const [x0, y0] = lonLatToTile(sw.lon, sw.lat, ZOOM).map(Math.floor);
-    const [x1, y1] = lonLatToTile(ne.lon, ne.lat, ZOOM).map(Math.floor);
+    const [x0, y0] = lonLatToTile(sw.lon, sw.lat, Z).map(Math.floor);
+    const [x1, y1] = lonLatToTile(ne.lon, ne.lat, Z).map(Math.floor);
     const tiles = new Map<string, ImageData>();
     const jobs: Promise<void>[] = [];
     for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
       for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
-        jobs.push(loadTile(x, y, signal).then((img) => void tiles.set(`${x}/${y}`, img)));
+        jobs.push(loadTile(Z, x, y, signal).then((img) => void tiles.set(`${x}/${y}`, img)));
     await Promise.all(jobs);
     const px = (img: ImageData, u: number, v: number) => {
       const k = (Math.min(255, Math.max(0, v)) * img.width + Math.min(255, Math.max(0, u))) * 4;
       return decodeTerrarium(img.data[k], img.data[k + 1], img.data[k + 2]);
     };
     const elevationAt = (lat: number, lon: number) => {
-      const [tx, ty] = lonLatToTile(lon, lat, ZOOM);
+      const [tx, ty] = lonLatToTile(lon, lat, Z);
       const img = tiles.get(`${Math.floor(tx)}/${Math.floor(ty)}`);
       if (!img) return 0;
       const u = (tx - Math.floor(tx)) * 256 - 0.5;

@@ -333,3 +333,19 @@ test('the city streams in tile by tile beyond the starting area', async ({ page 
   await page.screenshot({ path: 'test-results/25-tiles.png' });
   console.log('TILES', first, '→', await count(), (await page.locator('.attribution').innerText()).slice(0, 90));
 });
+
+test('city ring shows ~10 km of the city', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(() => localStorage.setItem('gcs.onboarded.v1', '1'));
+  await page.goto('/');
+  await page.getByRole('button', { name: /Chicago Loop/ }).click();
+  await expect(page.locator('.attribution')).toContainText('OpenFreeMap', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'City', exact: true }).click();
+  await page.waitForTimeout(15000);
+  await page.screenshot({ path: 'test-results/26-city-ring.png' });
+  await page.getByRole('button', { name: '2D plan' }).click();
+  await page.getByRole('button', { name: 'City', exact: true }).click();
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: 'test-results/27-city-ring-2d.png' });
+});

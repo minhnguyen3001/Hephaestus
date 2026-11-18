@@ -6,7 +6,9 @@ import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { signalPhase, type CityEvent, type SimParams, type Weather } from '../sim/simulation';
-import { trafficColor, type CameraMode, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
+import { inDetail, trafficColor, type CameraMode, type DetailZone, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
+import type { ContextTile } from '../geo/vectortiles';
+import { CONTEXT_RADIUS } from '../geo/vectortiles';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
 import { PRESETS } from './quality';
 import { pickMode, ToolController, type Hit, type Tool, type ZoneOptions } from './tools';
@@ -140,8 +142,8 @@ export class Plan2D implements WorldRenderer {
 
   setCameraMode(mode: CameraMode) {
     const r = this.world?.radius ?? 600;
-    const span = mode === 'aerial' ? r * 2.3 : mode === 'neighborhood' ? 700 : mode === 'street' ? 90 : 0;
-    if (mode === 'aerial') {
+    const span = mode === 'city' ? CONTEXT_RADIUS * 2.1 : mode === 'aerial' ? r * 2.3 : mode === 'neighborhood' ? 700 : mode === 'street' ? 90 : 0;
+    if (mode === 'aerial' || mode === 'city') {
       this.cx = 0;
       this.cy = 0;
     }
@@ -369,6 +371,21 @@ export class Plan2D implements WorldRenderer {
     }
   };
 
+  private ctx2d: { buildings: Path2D; roads: Path2D; water: Path2D; green: Path2D } | null = null;
+
+  setContext(tiles: ContextTile[], detail: DetailZone) {
+    const out = { buildings: new Path2D(), roads: new Path2D(), water: new Path2D(), green: new Path2D() };
+    const outside = (p: Vec2) => !inDetail(detail, p);
+    for (const t of tiles) {
+      for (const b of t.buildings) if (outside(b.ring[0])) out.buildings.addPath(this.polyPath(b.ring));
+      for (const w of t.water) if (outside(w[0])) out.water.addPath(this.polyPath(w));
+      for (const g of t.green) if (outside(g[0])) out.green.addPath(this.polyPath(g));
+      for (const r of t.roads) if (outside(r.points[0])) out.roads.addPath(this.linePath(r.points));
+    }
+    this.ctx2d = out;
+    this.version++;
+  }
+
   private staticCanvas = document.createElement('canvas');
   private staticKey = '';
   private version = 0;
@@ -471,6 +488,22 @@ export class Plan2D implements WorldRenderer {
     ctx.setTransform(s, 0, 0, -s, W / 2 - this.cx * s, H / 2 + this.cy * s);
     const w = this.world;
     if (!w) return;
+    if (this.ctx2d) {
+      ctx.fillStyle = '#ddd7ca';
+      ctx.beginPath();
+      ctx.arc(0, 0, CONTEXT_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#a6c98c';
+      ctx.fill(this.ctx2d.green);
+      ctx.fillStyle = '#6fa6d0';
+      ctx.fill(this.ctx2d.water);
+      ctx.strokeStyle = '#7d858f';
+      ctx.lineWidth = Math.max(6, px);
+      ctx.lineCap = 'round';
+      ctx.stroke(this.ctx2d.roads);
+      ctx.fillStyle = '#cfc6b6';
+      ctx.fill(this.ctx2d.buildings);
+    }
     ctx.fillStyle = '#e6e0d3';
     ctx.beginPath();
     ctx.arc(0, 0, w.radius, 0, Math.PI * 2);

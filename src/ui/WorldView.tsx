@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchAreas, fetchStations, fetchWorld } from '../geo/osm';
 import { fetchTerrain } from '../geo/terrain';
 import { loadedRadius, mergeWorld, TileStream } from '../geo/tiles';
+import { CONTEXT_RADIUS, contextTileKeys, fetchContextTile, type ContextTile } from '../geo/vectortiles';
 import type { Place, WorldData } from '../geo/types';
 import { applyEdits, pushEdit, redo, undo, type Edit, type History } from '../project/edits';
 import { encodePlan } from '../project/share';
@@ -91,6 +92,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   });
   const [mode, setMode] = useState<'3d' | '2d'>(readView);
   const [tiles, setTiles] = useState<{ loaded: number; pending: number; budget: number } | null>(null);
+  const [ctxTiles, setCtxTiles] = useState<ContextTile[]>([]);
+  const [detailKeys, setDetailKeys] = useState<string[]>(['0,0']);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [tour, setTour] = useState<TourSignals>({ cameraMoved: false, inspected: false, orbited: false, edited: false, compared: false, fast: false });
   const mark = useCallback((k: keyof TourSignals) => setTour((t) => (t[k] ? t : { ...t, [k]: true })), []);
@@ -223,7 +226,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     setError(null);
     const center = { lat: project.place.lat, lon: project.place.lon };
     // Terrain never blocks the city: it drapes in when the tiles arrive.
-    const terrain = fetchTerrain(center, project.radius, ctrl.signal).catch(() => undefined);
+    const terrain = fetchTerrain(center, CONTEXT_RADIUS, ctrl.signal).catch(() => undefined);
     fetchWorld(center, project.radius, ctrl.signal)
       .then((w) => {
         if (!w.buildings.length && !w.roads.length) setError('No mapped streets or buildings were found here. Try a more central location.');
@@ -325,6 +328,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         for (const w of batch) m = mergeWorld(m, w);
         return { ...m, radius: loadedRadius(stream.loaded, b.radius) };
       });
+      setDetailKeys([...stream.loaded]);
     }, 2500);
     const look = setInterval(() => {
       const v = engine.current?.getView();
@@ -338,6 +342,42 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseReady, project.place.lat, project.place.lon]);
+
+  // City ring: lightweight buildings/roads out to 5 km (10 km across) from free vector tiles, nearest first.
+  useEffect(() => {
+    if (!baseReady) return;
+    const center = { lat: project.place.lat, lon: project.place.lon };
+    const ctrl = new AbortController();
+    const queue = contextTileKeys(center, CONTEXT_RADIUS);
+    const done: ContextTile[] = [];
+    let active = 0;
+    const next = () => {
+      while (active < 4 && queue.length) {
+        const k = queue.shift()!;
+        active++;
+        fetchContextTile(center, k.x, k.y, ctrl.signal)
+          .then((t) => done.push(t))
+          .catch(() => undefined)
+          .finally(() => {
+            active--;
+            next();
+          });
+      }
+    };
+    next();
+    const flush = setInterval(() => {
+      if (done.length) setCtxTiles((cur) => (cur.length === done.length ? cur : [...done]));
+    }, 1200);
+    return () => {
+      ctrl.abort();
+      clearInterval(flush);
+    };
+  }, [baseReady, project.place.lat, project.place.lon]);
+
+  const terrainRef = base?.terrain;
+  useEffect(() => {
+    engine.current?.setContext(ctxTiles, { radius: project.radius, tiles: detailKeys });
+  }, [ctxTiles, detailKeys, terrainRef, project.radius, quality, mode]);
 
   // Terrain follows the loaded area: re-fetch (cached tiles, finer grid) when the city grows.
   const radius = base?.radius;
@@ -502,6 +542,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         >
           {mode === '3d' ? '2D plan' : '3D view'}
         </button>
+        <button onClick={() => setCam('city')} title="See the whole 10 km city">City</button>
         <button onClick={() => setCam('aerial')}>Aerial</button>
         <button onClick={() => setCam('neighborhood')}>District</button>
         <button onClick={() => setCam('street')}>Street</button>
@@ -610,6 +651,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {tiles && <span className="hide-sm">map {tiles.loaded}/{tiles.budget} km²{tiles.pending ? ` · loading ${tiles.pending}…` : ''} · </span>}
         {perf && <span className="hide-sm">{Math.round(perf.fps)} fps · {perf.frameMs.toFixed(1)} ms · {perf.quality} · </span>}
         Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
+        {ctxTiles.length > 0 && <> · <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a></>}
         {base?.terrain && <> · Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">AWS Terrain Tiles</a></>}
       </footer>
 
