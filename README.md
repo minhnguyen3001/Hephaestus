@@ -1,4 +1,6 @@
-# Hephaestus
+# Ptah
+
+*Repository and web address keep the earlier name: `Hephaestus`.*
 
 **Live demo:** https://minhnguyen3001.github.io/Hephaestus/
 

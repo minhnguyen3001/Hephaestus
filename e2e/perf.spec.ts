@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 
 /**
@@ -22,7 +22,10 @@ for (const [view, q] of [['2d', 'low'], ['3d', 'low'], ['3d', 'high']] as const)
     await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
     await page.locator('.attribution').filter({ hasText: 'buildings' }).waitFor({ timeout: 120_000 });
     const ready = Date.now() - t0;
-    await page.waitForTimeout(4000);
+    // let tiles and the city ring finish streaming: we measure steady-state interaction cost
+    await expect(page.locator('.attribution')).not.toContainText('loading', { timeout: 120_000 });
+    await expect(page.locator('.attribution')).not.toContainText('building scene', { timeout: 120_000 });
+    await page.waitForTimeout(6000);
     const samples: number[] = [];
     const ms: number[] = [];
     for (let i = 0; i < 6; i++) {

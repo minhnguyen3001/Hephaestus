@@ -9,7 +9,7 @@ import { FEATURED } from '../src/geo/geocode';
 import { buildOverpassQuery, OVERPASS_MIRRORS, packFile, slimElements, tileBounds } from '../src/geo/osm';
 import { makeProjection } from '../src/geo/util';
 
-const UA = 'Hephaestus-tile-builder/0.1 (open-source city planning sim)';
+const UA = 'Ptah-tile-builder/0.1 (open-source city planning sim)';
 const reach = Number(process.argv[2] ?? 1);
 const only = process.argv[3];
 

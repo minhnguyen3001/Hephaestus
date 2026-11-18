@@ -11,7 +11,7 @@ export function Landing({ onOpenPlace, onOpenProject, notice }: { onOpenPlace: (
     <div className="landing">
       <div className="landing-bg" aria-hidden />
       <header className="landing-top">
-        <div className="brand"><span className="logo" />Hephaestus</div>
+        <div className="brand"><span className="logo" />Ptah</div>
         <span className="pill">Early preview</span>
       </header>
       <main className="hero">

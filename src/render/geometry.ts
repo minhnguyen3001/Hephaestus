@@ -36,7 +36,10 @@ export function buildingGeometry(b: Building, color: THREE.Color, base = 0): THR
   const fac: number[] = [];
   const roof = color.clone().multiplyScalar(0.82);
   // facade style: 1 punched windows, 2 glass curtain wall (towers), 3 blank (industrial, parking)
-  const style = b.height > 40 && (b.use === 'office' || b.height > 70) ? 2 : b.use === 'industrial' || b.use === 'parking' ? 3 : 1;
+  const style = b.height > 40 && (b.use === 'office' || b.height > 70) ? 2
+    : b.use === 'industrial' || b.use === 'parking' ? 3
+    : b.use === 'commercial' || (b.height > 9 && b.use !== 'residential' && hash01(b.id + 's') < 0.4) ? 4 // shops on the ground floor
+    : 1;
   let u = 0;
   for (let i = 0; i < pts.length; i++) {
     const [x1, y1] = pts[i];
@@ -267,47 +270,95 @@ export class PickMesh {
   }
 }
 
-/** Low-poly agent models: origin at ground, facing +z. */
+/** Paint a geometry one colour (white parts take the instance colour; dark parts stay dark). */
+function paint(g: THREE.BufferGeometry, hexc: number): THREE.BufferGeometry {
+  const ng = g.index ? g.toNonIndexed() : g;
+  const c = new THREE.Color(hexc);
+  const n = ng.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+  ng.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  if (ng.attributes.uv) ng.deleteAttribute('uv');
+  return ng;
+}
+
+/** Low-poly agent models: origin at ground, facing +z. Parts are vertex-coloured; instances tint the white parts. */
 export function agentGeometry(kind: string): THREE.BufferGeometry {
-  const box = (w: number, h: number, l: number, y: number, z = 0) => new THREE.BoxGeometry(w, h, l).translate(0, y + h / 2, z);
+  const box = (w: number, h: number, l: number, y: number, z = 0, x = 0) => new THREE.BoxGeometry(w, h, l).translate(x, y + h / 2, z);
+  const BODY = 0xffffff;
+  const GLASS = 0x2b3440;
+  const TYRE = 0x1b1b1b;
+  const wheel = (x: number, z: number, r: number, w: number) => paint(new THREE.CylinderGeometry(r, r, w, 8).rotateZ(Math.PI / 2).translate(x, r, z), TYRE);
+  const wheels = (halfTrack: number, zs: number[], r: number, w = 0.26) => zs.flatMap((z) => [wheel(halfTrack, z, r, w), wheel(-halfTrack, z, r, w)]);
+  const merge = (parts: THREE.BufferGeometry[]) => mergeGeometries(parts)!;
   switch (kind) {
     case 'pedestrian':
-      return mergeGeometries([
-        new THREE.CylinderGeometry(0.2, 0.24, 1.35, 6).translate(0, 0.68, 0),
-        new THREE.SphereGeometry(0.17, 6, 4).translate(0, 1.55, 0),
-      ])!;
+      return merge([
+        paint(box(0.14, 0.78, 0.18, 0, 0, 0.1), 0x2f3640), // legs
+        paint(box(0.14, 0.78, 0.18, 0, 0, -0.1), 0x2f3640),
+        paint(new THREE.CylinderGeometry(0.19, 0.22, 0.62, 6).translate(0, 1.1, 0), BODY), // torso (clothes colour)
+        paint(new THREE.SphereGeometry(0.15, 6, 4).translate(0, 1.58, 0), 0xe2b48c), // head
+      ]);
     case 'bicycle':
-      return mergeGeometries([box(0.12, 0.7, 1.7, 0.15), box(0.45, 0.9, 0.5, 0.8, -0.1)])!;
+      return merge([
+        wheel(0, 0.6, 0.34, 0.06), wheel(0, -0.6, 0.34, 0.06),
+        paint(box(0.08, 0.08, 1.1, 0.55), BODY),
+        paint(new THREE.CylinderGeometry(0.18, 0.2, 0.6, 6).translate(0, 1.15, -0.1), BODY),
+        paint(new THREE.SphereGeometry(0.14, 6, 4).translate(0, 1.6, -0.05), 0xe2b48c),
+      ]);
     case 'motorcycle':
-      return mergeGeometries([box(0.45, 0.6, 1.9, 0.25), box(0.55, 0.75, 0.55, 0.85, -0.15)])!;
+      return merge([
+        wheel(0, 0.7, 0.3, 0.12), wheel(0, -0.7, 0.3, 0.12),
+        paint(box(0.4, 0.45, 1.5, 0.35), BODY),
+        paint(new THREE.CylinderGeometry(0.2, 0.22, 0.6, 6).translate(0, 1.15, -0.15), 0x3a3f47),
+        paint(new THREE.SphereGeometry(0.17, 6, 4).translate(0, 1.6, -0.1), 0x222222), // helmet
+      ]);
     case 'truck':
-      return mergeGeometries([box(2.4, 2.6, 2.2, 0.4, 3.2), box(2.5, 3.1, 6.6, 0.45, -1.1)])!;
+      return merge([
+        paint(box(2.4, 2.2, 2.1, 0.55, 3.2), BODY),
+        paint(box(2.3, 0.8, 0.12, 1.75, 4.25), GLASS),
+        paint(box(2.5, 3.0, 6.4, 0.6, -1.0), 0xe8e8e8),
+        ...wheels(1.05, [3.4, -0.4, -3.2], 0.5, 0.4),
+      ]);
     case 'bus':
-      return mergeGeometries([box(2.55, 2.7, 12, 0.35), box(2.3, 0.25, 9, 3.05)])!;
+      return merge([
+        paint(box(2.55, 2.75, 12, 0.35), BODY),
+        paint(box(2.6, 0.95, 10.6, 1.65, -0.3), GLASS), // window band
+        paint(box(2.3, 1.2, 0.1, 1.5, 6.0), GLASS), // windscreen
+        ...wheels(1.1, [4.2, -3.8], 0.5, 0.35),
+      ]);
     case 'train':
-      return mergeGeometries([box(3, 3.4, 1, 0.5), box(2.6, 0.3, 0.8, 3.9)])!;
+      return merge([paint(box(3, 3.4, 1, 0.5), BODY), paint(box(3.05, 0.9, 0.9, 2.2), GLASS), paint(box(2.6, 0.3, 0.8, 3.9), 0x8a8f96)]);
     case 'emergency':
-      return mergeGeometries([box(2.1, 1.9, 5.6, 0.35), box(1.9, 0.6, 1.6, 0.6, 2.6)])!;
+      return merge([
+        paint(box(2.1, 1.9, 5.6, 0.45), BODY),
+        paint(box(2.15, 0.7, 1.2, 1.35, 2.2), GLASS),
+        paint(box(2.16, 0.3, 5.0, 0.95, -0.2), 0xd8342c), // stripe
+        ...wheels(0.92, [1.9, -1.9], 0.42),
+      ]);
     case 'lightbar':
-      return box(1.4, 0.25, 0.45, 2.25, 0.4);
+      return paint(box(1.4, 0.25, 0.45, 2.35, 0.4), BODY);
     case 'pillar':
       return box(1.2, 1, 1.2, 0);
-    case 'tree': {
-      // trunk + two-lobe canopy, coloured per vertex (instance colour tints it)
-      const paint = (g: THREE.BufferGeometry, hexc: number) => {
-        const ng = g.toNonIndexed();
-        const c = new THREE.Color(hexc);
-        ng.setAttribute('color', new THREE.Float32BufferAttribute(new Array(ng.attributes.position.count).fill(0).flatMap(() => [c.r, c.g, c.b]), 3));
-        ng.deleteAttribute('uv');
-        return ng;
-      };
-      return mergeGeometries([
+    case 'tree':
+      return merge([
         paint(new THREE.CylinderGeometry(0.16, 0.24, 2.6, 5).translate(0, 1.3, 0), 0x8a6a4c),
         paint(new THREE.IcosahedronGeometry(2.3, 0).translate(0, 4, 0), 0xffffff),
         paint(new THREE.IcosahedronGeometry(1.6, 0).translate(0.6, 5.4, 0.3), 0xf0f0f0),
-      ])!;
-    }
+      ]);
+    case 'conifer':
+      return merge([
+        paint(new THREE.CylinderGeometry(0.15, 0.2, 1.6, 5).translate(0, 0.8, 0), 0x7a5a3c),
+        paint(new THREE.ConeGeometry(1.8, 3.6, 7).translate(0, 3.0, 0), 0xd8e8d8),
+        paint(new THREE.ConeGeometry(1.3, 2.8, 7).translate(0, 4.8, 0), 0xd8e8d8),
+      ]);
     default: // car, taxi
-      return mergeGeometries([box(1.85, 0.75, 4.5, 0.3), box(1.65, 0.6, 2.4, 1.05, -0.2)])!;
+      return merge([
+        paint(box(1.85, 0.7, 4.5, 0.32), BODY),
+        paint(box(1.62, 0.58, 2.3, 1.02, -0.25), BODY),
+        paint(box(1.66, 0.42, 2.0, 1.08, -0.25), GLASS), // side windows
+        paint(box(1.5, 0.4, 0.1, 1.07, 0.92), GLASS), // windscreen
+        ...wheels(0.86, [1.45, -1.45], 0.34),
+      ]);
   }
 }

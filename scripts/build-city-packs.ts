@@ -11,7 +11,7 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { FEATURED } from '../src/geo/geocode';
 import { buildOverpassQuery, OVERPASS_MIRRORS, PACK_RADIUS, packFile, slimElements, type PackIndexEntry } from '../src/geo/osm';
 
-const UA = 'Hephaestus-pack-builder/0.1 (open-source city planning sim)';
+const UA = 'Ptah-pack-builder/0.1 (open-source city planning sim)';
 
 async function query(q: string): Promise<{ elements: unknown[] }> {
   // Public servers are often busy: try every mirror, then back off and retry the whole round.

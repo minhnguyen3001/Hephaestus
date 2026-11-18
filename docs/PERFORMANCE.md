@@ -31,6 +31,17 @@ Simulation (Node, unthrottled): worst tick 37 ms for 900 agents in Shibuya at 85
 
 Bundle: landing ~49 KB gz. The 3D engine (three.js ~125 KB gz) and workspace (~38 KB gz) are lazy-loaded. The worker is ~18 KB.
 
+## Steady state with the 10 km city (2026-11-17)
+This was measured after streaming finished, with 4× CPU throttling, software GL, Manhattan, the detail zone with streamed tiles, and the city ring.
+
+| View | Main-thread ms/frame |
+| --- | --- |
+| 2D plan | 3 |
+| 3D Low | 6 |
+| 3D High | 23 (includes software-GPU back-pressure) |
+
+Large loads are time-sliced: chunk and city-ring builds run at most 6–10 ms per frame, nearest the camera first, and the status bar shows "building scene…". Edits that touch one to three chunks apply immediately.
+
 ## Techniques in place
 - Buildings, roads, areas and rails merged into a few meshes; agents, trees, signals and pillars instanced.
 - Simulation in a Web Worker, sending compact Float32Array frames.

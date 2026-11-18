@@ -8,12 +8,13 @@ export interface Preset {
   maxAgents: number;
   radius: number; // meters of map data loaded around the location at first
   tiles: number; // max extra 1 km² tiles streamed in as the user explores
+  ring: number; // city-ring radius in metres (lightweight context buildings)
 }
 
 export const PRESETS: Record<Quality, Preset> = {
-  low: { pixelRatio: 0.85, shadows: false, shadowSize: 0, maxAgents: 160, radius: 450, tiles: 12 },
-  medium: { pixelRatio: 1.25, shadows: true, shadowSize: 1024, maxAgents: 420, radius: 650, tiles: 30 },
-  high: { pixelRatio: 2, shadows: true, shadowSize: 2048, maxAgents: 900, radius: 850, tiles: 60 },
+  low: { pixelRatio: 0.85, shadows: false, shadowSize: 0, maxAgents: 160, radius: 450, tiles: 12, ring: 3000 },
+  medium: { pixelRatio: 1.25, shadows: true, shadowSize: 1024, maxAgents: 420, radius: 650, tiles: 30, ring: 4000 },
+  high: { pixelRatio: 2, shadows: true, shadowSize: 2048, maxAgents: 900, radius: 850, tiles: 60, ring: 5000 },
 };
 
 /** Initial guess from device hints; the engine then adapts to measured frame rate. */

@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { Area, Building, Road, Vec2, WorldData } from '../geo/types';
 import { sampleTerrain } from '../geo/terrain';
 import { treePoints } from '../geo/trees';
-import { centroid, dist } from '../geo/util';
+import { centroid, dist, hash01, pointInPolygon, signedArea } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { SavedView } from '../project/store';
 import { CONTEXT_RADIUS, type ContextTile } from '../geo/vectortiles';
@@ -16,7 +16,7 @@ import type { AgentView } from '../sim/protocol';
 import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type CityEvent, type SimParams, type SimStats, type Weather } from '../sim/simulation';
 
 export type { AgentInfo };
-import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
+import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, pitchedRoof, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
 import { PRESETS, resolveQuality, type Quality, type QualitySetting } from './quality';
 import { pickMode, ToolController, type Tool, type ZoneOptions } from './tools';
 import { ZONE_COLORS } from './palette';
@@ -39,6 +39,8 @@ export interface Perf {
   quality: Quality;
   /** Average main-thread milliseconds per frame spent in our loop (simulation sync + scene update + render submit). */
   frameMs: number;
+  /** Scene pieces still queued for building (0 = fully loaded). */
+  pending: number;
 }
 
 /** What the UI needs from any world view (3D engine or 2D plan). */
@@ -71,6 +73,20 @@ export interface WorldRenderer {
 export interface DetailZone {
   radius: number;
   tiles: string[];
+}
+
+/** Split a city-ring tile into four quarter tiles (by feature position) with their own keys. */
+function splitTile(t: ContextTile): ContextTile[] {
+  const q = (p: Vec2) => (p[0] >= t.center[0] ? 1 : 0) + (p[1] >= t.center[1] ? 2 : 0);
+  const parts = [0, 1, 2, 3].map((i) => ({
+    key: `${t.key}#${i}`, center: [t.center[0] + (i & 1 ? 450 : -450), t.center[1] + (i & 2 ? 450 : -450)] as Vec2,
+    buildings: [] as ContextTile['buildings'], roads: [] as ContextTile['roads'], water: [] as Vec2[][], green: [] as Vec2[][],
+  }));
+  for (const b of t.buildings) parts[q(b.ring[0])].buildings.push(b);
+  for (const r of t.roads) parts[q(r.points[0])].roads.push(r);
+  for (const w of t.water) parts[q(w[0])].water.push(w);
+  for (const g of t.green) parts[q(g[0])].green.push(g);
+  return parts;
 }
 
 export function inDetail(z: DetailZone, p: Vec2): boolean {
@@ -127,6 +143,18 @@ const PALETTES: Record<string, number[]> = {
   emergency: [0xf4f4f4, 0xf4f4f4, 0xd8342c],
 };
 const MAX_INSTANCES = 1100;
+/** Chunk size (m): big enough to keep draw calls low, small enough that an edit rebuilds quickly. */
+const CHUNK = 300;
+
+// Shared street furniture (instanced per chunk; geometry/materials are shared, never disposed per chunk).
+const POLE_GEO = new THREE.CylinderGeometry(0.07, 0.1, 6.5, 5).translate(0, 3.25, 0);
+const LAMP_GEO = new THREE.BoxGeometry(0.5, 0.18, 1.1).translate(0, 6.4, 0.55);
+const UNIT_GEO = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+const STRIPE_GEO = new THREE.BoxGeometry(0.55, 0.05, 3);
+const POLE_MAT = new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.6 });
+const LAMP_MAT = new THREE.MeshBasicMaterial({ color: 0x55585e });
+const UNIT_MAT = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.8 });
+const STRIPE_MAT = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
 
 /** A pinned note: a stalk from the ground and a label that stays readable at any distance. */
 function noteMarker(text: string, at: THREE.Vector3): THREE.Group {
@@ -163,6 +191,9 @@ function noteMarker(text: string, at: THREE.Vector3): THREE.Group {
 const UNDER = 14; // rail tunnel depth below ground, meters
 const ROAD_TUNNEL = 8; // road tunnel depth
 const SKY_DAY = new THREE.Color(0xa8cbe8);
+const LAMP_ON = new THREE.Color(0xffd28a);
+const SIDEWALK = new Set(['primary', 'secondary', 'tertiary', 'residential']);
+const SIDEWALK_COLOR = new THREE.Color(0xc9c3b8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
 const SKY_NIGHT = new THREE.Color(0x0b1322);
 
@@ -220,10 +251,11 @@ export class Engine implements WorldRenderer {
   private layers: Layers = { agents: true, transit: true, estimated: false, traffic: false, trees: true, underground: false };
   private undergroundGroup = new THREE.Group();
   private groundMats: THREE.Material[] = [];
-  private treeMesh?: THREE.InstancedMesh;
+  private treeMesh?: THREE.Object3D;
   private trafficT = 0;
   private signalPoles?: THREE.InstancedMesh;
   private signalLights?: THREE.InstancedMesh;
+  private crosswalks?: THREE.InstancedMesh;
   private raycaster = new THREE.Raycaster();
   private down?: { x: number; y: number; t: number };
   private ro: ResizeObserver;
@@ -309,7 +341,7 @@ export class Engine implements WorldRenderer {
     this.sun.shadow.normalBias = 0.6;
     this.scene.fog = new THREE.Fog(SKY_DAY, 2000, 9000);
 
-    const agentMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.15 });
+    const agentMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.15 });
     for (const k of AGENT_KINDS) {
       const m = new THREE.InstancedMesh(agentGeometry(k), agentMat, MAX_INSTANCES);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -322,12 +354,12 @@ export class Engine implements WorldRenderer {
       this.agentSlots[k] = [];
       this.scene.add(m);
     }
-    this.lightbars = new THREE.InstancedMesh(agentGeometry('lightbar'), new THREE.MeshBasicMaterial(), 64);
+    this.lightbars = new THREE.InstancedMesh(agentGeometry('lightbar'), new THREE.MeshBasicMaterial({ vertexColors: true }), 64);
     this.lightbars.setColorAt(0, new THREE.Color());
     this.lightbars.count = 0;
     this.lightbars.frustumCulled = false;
     this.scene.add(this.lightbars);
-    this.trainMesh = new THREE.InstancedMesh(agentGeometry('train'), new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.5 }), 200);
+    this.trainMesh = new THREE.InstancedMesh(agentGeometry('train'), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.5 }), 200);
     this.trainMesh.setColorAt(0, new THREE.Color());
     this.trainMesh.count = 0;
     this.trainMesh.frustumCulled = false;
@@ -501,7 +533,15 @@ export class Engine implements WorldRenderer {
             diffuseColor.rgb = mix(mix(diffuseColor.rgb, glass, 0.72), vec3(0.82, 0.85, 0.88), mull * 0.6);
             float r = fract(sin(dot(floor(cell * vec2(0.5, 1.0)) + vColor.rg * 97.0, vec2(12.9898, 78.233))) * 43758.5453);
             gLit = (1.0 - mull) * step(0.45, r) * 0.8;
-          } else if (vWall > 0.5 && vWall < 1.5 && vFacade.y > 2.8) {
+          } else if (vWall > 3.5 && vFacade.y < 4.2) {
+            // ground-floor shopfront: tall glass bays with thin frames, warm light after dark
+            vec2 cell = vec2(vFacade.x / 4.0, 0.0);
+            float fx = fract(cell.x);
+            float frame = step(0.94, fx) * (1.0 - smoothstep(0.3, 0.7, fwidth(cell.x)));
+            float glassBand = step(0.35, vFacade.y) * step(vFacade.y, 3.6);
+            diffuseColor.rgb = mix(diffuseColor.rgb, mix(vec3(0.22, 0.28, 0.33), vec3(0.15), frame), glassBand * 0.85);
+            gLit = glassBand * (1.0 - frame) * 0.9;
+          } else if (vWall > 0.5 && vWall != 2.0 && vWall != 3.0 && vFacade.y > 2.8) {
             vec2 cell = vec2(vFacade.x / 3.4, (vFacade.y - 0.8) / 3.2);
             vec2 f = fract(cell);
             float rawWin = step(0.2, f.x) * step(f.x, 0.8) * step(0.3, f.y) * step(f.y, 0.85);
@@ -532,6 +572,20 @@ export class Engine implements WorldRenderer {
   // ---------- incremental static scene ----------
   // Each layer remembers the inputs it was built from and only rebuilds when they change. Buildings
   // and roads live in ~300 m chunks, so an edit rebuilds one chunk instead of the whole city.
+  /** Deferred scene-building work, run a few ms per frame (nearest first) so big loads never freeze the UI. */
+  private work = new Map<string, { at: Vec2; run: () => void }>();
+  private runWork(budgetMs: number) {
+    if (!this.work.size) return;
+    const t0 = performance.now();
+    const cam: Vec2 = [this.controls.target.x, -this.controls.target.z];
+    const jobs = [...this.work.entries()].sort((a, b) => dist(a[1].at, cam) - dist(b[1].at, cam));
+    for (const [k, job] of jobs) {
+      this.work.delete(k);
+      job.run();
+      if (performance.now() - t0 > budgetMs) break;
+    }
+  }
+
   private layerDeps = new Map<string, unknown[]>();
   private layers3d = new Map<string, THREE.Group>();
   private buildingChunks = new Map<string, { deps: unknown[]; pick: PickMesh }>();
@@ -559,7 +613,7 @@ export class Engine implements WorldRenderer {
   }
 
   private chunkKey(p: Vec2) {
-    return `${Math.floor(p[0] / 300)},${Math.floor(p[1] / 300)}`;
+    return `${Math.floor(p[0] / CHUNK)},${Math.floor(p[1] / CHUNK)}`;
   }
 
   private syncChunks<T>(
@@ -571,23 +625,41 @@ export class Engine implements WorldRenderer {
       const k = keyOf(it);
       (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
     }
+    const drop = (pm: PickMesh) => {
+      for (const ch of pm.mesh.children) (ch as THREE.InstancedMesh).dispose?.();
+      this.worldGroup.remove(pm.mesh);
+      pm.dispose();
+    };
+    const tag = store === this.buildingChunks ? 'b' : 'r';
+    for (const key of [...this.work.keys()]) if (key.startsWith(`${tag}:`) && !groups.has(key.slice(2))) this.work.delete(key);
     for (const [k, c] of store) {
       if (groups.has(k)) continue;
-      this.worldGroup.remove(c.pick.mesh);
-      c.pick.dispose();
+      drop(c.pick);
       store.delete(k);
     }
+    const changed: [string, T[], unknown[]][] = [];
     for (const [k, list] of groups) {
       const deps = [...extra, ...list];
       const cur = store.get(k);
       if (cur && this.same(cur.deps, deps)) continue;
-      if (cur) {
-        this.worldGroup.remove(cur.pick.mesh);
-        cur.pick.dispose();
-      }
-      const pick = build(list);
-      store.set(k, { deps, pick });
-      this.worldGroup.add(pick.mesh);
+      changed.push([k, list, deps]);
+    }
+    // An edit touches a chunk or two: apply now. Big loads (new tiles, quality change) are time-sliced.
+    const now = changed.length <= 3;
+    for (const [k, list, deps] of changed) {
+      const job = () => {
+        const cur = store.get(k);
+        if (cur) drop(cur.pick);
+        const pick = build(list);
+        store.set(k, { deps, pick });
+        this.worldGroup.add(pick.mesh);
+        pick.mesh.visible = true;
+      };
+      const [cx, cy] = k.split(',').map((v) => (Number(v) + 0.5) * CHUNK);
+      if (now) {
+        this.work.delete(`${store === this.buildingChunks ? 'b' : 'r'}:${k}`);
+        job();
+      } else this.work.set(`${store === this.buildingChunks ? 'b' : 'r'}:${k}`, { at: [cx, cy], run: job });
     }
   }
 
@@ -672,6 +744,7 @@ export class Engine implements WorldRenderer {
     const mark = new THREE.Color(0xeae3c9);
     this.syncChunks(this.roadChunks, w.roads.filter((rd) => !rd.tunnel), (rd) => this.chunkKey(rd.points[0]), [t, q], (list) => {
       const items: { id: string; geom: THREE.BufferGeometry }[] = [];
+      const lights: [number, number, number][] = [];
       for (const road of list) {
         const color = new THREE.Color(ROAD_COLORS[road.kind]);
         if (road.origin === 'proposed') color.lerp(new THREE.Color(0x3fd3c3), 0.45);
@@ -689,8 +762,42 @@ export class Engine implements WorldRenderer {
           const c = ribbonGeometry(road.points, 0.18, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.01, mark);
           if (c) items.push({ id: `${road.id}#m`, geom: c });
         }
+        // raised sidewalks along city streets
+        if (SIDEWALK.has(road.kind) && !road.bridge) {
+          const off = roadWidth(road) / 2 + 1.15;
+          for (const side of [-1, 1]) {
+            const sw = ribbonGeometry(offsetLine(road.points, side * off), 2.3, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.14, SIDEWALK_COLOR);
+            if (sw) items.push({ id: `${road.id}#m`, geom: sw });
+          }
+          // street lights every ~38 m, alternating sides
+          let acc = 19;
+          for (let i = 1; i < road.points.length; i++) {
+            const [a, b] = [road.points[i - 1], road.points[i]];
+            const len = dist(a, b);
+            const dir: Vec2 = [(b[0] - a[0]) / (len || 1), (b[1] - a[1]) / (len || 1)];
+            while (acc < len) {
+              const side = lights.length % 2 ? 1 : -1;
+              const px = a[0] + dir[0] * acc + dir[1] * side * (off + 0.6);
+              const py = a[1] + dir[1] * acc - dir[0] * side * (off + 0.6);
+              lights.push([px, py, Math.atan2(-dir[1] * side, -dir[0] * side)]);
+              acc += 38;
+            }
+            acc -= len;
+          }
+        }
       }
       const pick = new PickMesh(items, this.flatMat);
+      if (lights.length) {
+        const poles = new THREE.InstancedMesh(POLE_GEO, POLE_MAT, lights.length);
+        const lamps = new THREE.InstancedMesh(LAMP_GEO, LAMP_MAT, lights.length);
+        lights.forEach(([x, y, ang], k) => {
+          this.tmpM.makeRotationY(ang).setPosition(x, this.hp([x, y]) + lift, -y);
+          poles.setMatrixAt(k, this.tmpM);
+          lamps.setMatrixAt(k, this.tmpM);
+        });
+        poles.userData.detail = lamps.userData.detail = true;
+        pick.mesh.add(poles, lamps);
+      }
       pick.mesh.receiveShadow = shadows;
       pick.mesh.userData.pick = 'road';
       pick.mesh.userData.chunk = pick;
@@ -732,19 +839,29 @@ export class Engine implements WorldRenderer {
     if (treesG) {
       const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[q]);
       if (trees.length) {
-        const tm = new THREE.InstancedMesh(agentGeometry('tree'), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }), trees.length);
+        // ~30% conifers for variety; both species instanced
+        const jit = (x: number, y: number) => ((x * 73.1 + y * 37.7) % 1 + 1) % 1; // cheap stable jitter
+        const conifer = trees.filter((tr) => jit(tr.p[1], tr.p[0]) < 0.3);
+        const leafy = trees.filter((tr) => jit(tr.p[1], tr.p[0]) >= 0.3);
+        const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
         const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
         const sc = new THREE.Vector3();
-        trees.forEach((tr, i) => {
-          const [x, y] = tr.p;
-          const k = ((x * 73.1 + y * 37.7) % 1 + 1) % 1; // cheap stable jitter
-          this.tmpM.makeRotationY(k * 6.28).scale(sc.set(tr.scale, tr.scale * (0.9 + k * 0.3), tr.scale)).setPosition(x, this.h(x, y) + lift, -y);
-          tm.setMatrixAt(i, this.tmpM);
-          tm.setColorAt(i, this.tmpC.setHex(greens[i % greens.length]));
-        });
-        tm.castShadow = shadows;
-        this.treeMesh = tm;
-        treesG.add(tm);
+        const group = new THREE.Group();
+        for (const [list, geo, cols] of [[leafy, 'tree', greens], [conifer, 'conifer', [0x3f6b45, 0x4a7a4f, 0x355e3d]]] as const) {
+          if (!list.length) continue;
+          const tm = new THREE.InstancedMesh(agentGeometry(geo), mat, list.length);
+          list.forEach((tr, i) => {
+            const [x, y] = tr.p;
+            const k = jit(x, y);
+            this.tmpM.makeRotationY(k * 6.28).scale(sc.set(tr.scale, tr.scale * (0.9 + k * 0.3), tr.scale)).setPosition(x, this.h(x, y) + lift, -y);
+            tm.setMatrixAt(i, this.tmpM);
+            tm.setColorAt(i, this.tmpC.setHex(cols[i % cols.length]));
+          });
+          tm.castShadow = shadows;
+          group.add(tm);
+        }
+        this.treeMesh = group;
+        treesG.add(group);
       } else this.treeMesh = undefined;
     }
     if (this.treeMesh) this.treeMesh.visible = this.layers.trees;
@@ -755,6 +872,28 @@ export class Engine implements WorldRenderer {
     const style: BuildingStyle = { highlightEstimated: this.layers.estimated };
     this.syncChunks(this.buildingChunks, w.buildings, (b) => this.chunkKey(b.footprint[0]), [t, q, this.layers.estimated], (list) => {
       const pick = new PickMesh(list.map((b) => ({ id: b.id, geom: buildingGeometry(b, buildingColor(b, style), this.base(b)) })), this.buildingMat);
+      // rooftop plant on large flat roofs (cheap instanced boxes, deterministic placement)
+      const units: THREE.Matrix4[] = [];
+      for (const b of list) {
+        const area = Math.abs(signedArea(b.footprint));
+        if (area < 350 || b.height < 10 || pitchedRoof(b, b.footprint)) continue;
+        const c = centroid(b.footprint);
+        const n = Math.min(3, Math.floor(area / 400) + 1);
+        for (let k = 0; k < n; k++) {
+          const ang = hash01(`${b.id}${k}`) * Math.PI * 2;
+          const r = Math.sqrt(area) * 0.18 * hash01(`${b.id}r${k}`);
+          const p: Vec2 = [c[0] + Math.cos(ang) * r, c[1] + Math.sin(ang) * r];
+          if (!pointInPolygon(p, b.footprint)) continue;
+          const sz = 1.5 + hash01(`${b.id}s${k}`) * 2.5;
+          units.push(new THREE.Matrix4().makeRotationY(ang).scale(new THREE.Vector3(sz, 1 + sz * 0.4, sz * 1.4)).setPosition(p[0], this.base(b) + b.height, -p[1]));
+        }
+      }
+      if (units.length) {
+        const um = new THREE.InstancedMesh(UNIT_GEO, UNIT_MAT, units.length);
+        units.forEach((m, k) => um.setMatrixAt(k, m));
+        um.userData.detail = true;
+        pick.mesh.add(um);
+      }
       pick.mesh.castShadow = shadows;
       pick.mesh.receiveShadow = shadows;
       pick.mesh.userData.pick = 'building';
@@ -1004,7 +1143,11 @@ export class Engine implements WorldRenderer {
       this.scene.remove(m);
       m.geometry.dispose();
     }
-    this.signalPoles = this.signalLights = undefined;
+    if (this.crosswalks) {
+      this.scene.remove(this.crosswalks);
+      this.crosswalks.dispose();
+    }
+    this.signalPoles = this.signalLights = this.crosswalks = undefined;
     const heads = this.sim?.info.signals ?? [];
     if (!heads.length) return;
     const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.1, 0.12, 4.6, 6).translate(0, 2.3, 0), new THREE.MeshStandardMaterial({ color: 0x3a3f46 }), heads.length);
@@ -1018,6 +1161,27 @@ export class Engine implements WorldRenderer {
     this.signalPoles = poles;
     this.signalLights = lights;
     this.scene.add(poles, lights);
+    // zebra crossings across each signalled approach, a few metres before the junction
+    const stripes: THREE.Matrix4[] = [];
+    const seen = new Set<string>();
+    for (const h of heads) {
+      const k = `${Math.round(h.cx)},${Math.round(h.cy)},${Math.round(Math.atan2(h.hy, h.hx) * 4)}`;
+      if (seen.has(k) || h.hw < 2) continue;
+      seen.add(k);
+      const cx = h.cx - h.hx * (h.hw + 3);
+      const cy = h.cy - h.hy * (h.hw + 3);
+      const rot = Math.atan2(h.hx, -h.hy);
+      for (let o = -h.hw + 0.5; o <= h.hw - 0.4; o += 1.1) {
+        const x = cx + h.hy * o;
+        const y = cy - h.hx * o;
+        stripes.push(new THREE.Matrix4().makeRotationY(rot).setPosition(x, this.h(x, y) + this.lift + 0.16, -y));
+      }
+    }
+    if (stripes.length) {
+      this.crosswalks = new THREE.InstancedMesh(STRIPE_GEO, STRIPE_MAT, stripes.length);
+      stripes.forEach((m, i) => this.crosswalks!.setMatrixAt(i, m));
+      this.scene.add(this.crosswalks);
+    }
   }
 
   private updateSignals() {
@@ -1034,12 +1198,14 @@ export class Engine implements WorldRenderer {
 
   // ---------- city ring (context tiles) ----------
   private ctxTiles = new Map<string, { sig: string; group: THREE.Group }>();
+  private ctxBuildingMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   private ctxMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
 
   setContext(tiles: ContextTile[], detail: DetailZone) {
     const keep = new Set(tiles.map((t) => t.key));
+    for (const key of [...this.work.keys()]) if (key.startsWith('c:') && !keep.has(key.slice(2).split('#')[0])) this.work.delete(key);
     for (const [k, c] of this.ctxTiles) {
-      if (keep.has(k)) continue;
+      if (keep.has(k.split('#')[0])) continue;
       this.clearGroup(c.group);
       this.scene.remove(c.group);
       this.ctxTiles.delete(k);
@@ -1049,7 +1215,20 @@ export class Engine implements WorldRenderer {
     for (const t of tiles) {
       const sig = overlapSig(detail, t.center) + terrainSig;
       const cur = this.ctxTiles.get(t.key);
-      if (cur?.sig === sig) continue;
+      if (cur?.sig === sig || this.work.get(`c:${t.key}#0`)?.run.name === sig) continue;
+      // dense tiles hold tens of thousands of buildings: build in four quarters so no frame stalls
+      const parts = splitTile(t);
+      parts.forEach((part, qi) => {
+        const run = () => this.buildContextTile(part, detail, sig, lift);
+        Object.defineProperty(run, 'name', { value: sig });
+        this.work.set(`c:${t.key}#${qi}`, { at: part.center, run });
+      });
+    }
+  }
+
+  private buildContextTile(t: ContextTile, detail: DetailZone, sig: string, lift: number) {
+    {
+      const cur = this.ctxTiles.get(t.key);
       if (cur) {
         this.clearGroup(cur.group);
         this.scene.remove(cur.group);
@@ -1058,15 +1237,18 @@ export class Engine implements WorldRenderer {
       const outside = (p: Vec2) => !inDetail(detail, p);
       // buildings: same facade shader as detailed ones, neutral palette, no shadows (cheap)
       const bgeoms: THREE.BufferGeometry[] = [];
+      const ringR = PRESETS[this.quality].ring;
       for (const b of t.buildings) {
         const c = centroid(b.ring);
-        if (!outside(c)) continue;
+        if (!outside(c) || c[0] * c[0] + c[1] * c[1] > ringR * ringR) continue;
+        if (b.height < 6 && Math.abs(signedArea(b.ring)) < 60) continue; // sheds and garages add triangles, not information
         const fake: Building = { id: `${t.key}:${c[0] | 0}:${c[1] | 0}`, footprint: b.ring, height: b.height, heightSource: 'osm-height', use: b.height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real' };
         let base = Infinity;
         for (const p of b.ring) base = Math.min(base, this.hp(p));
         bgeoms.push(buildingGeometry(fake, buildingColor(fake, { highlightEstimated: false }), base));
       }
-      if (bgeoms.length) g.add(new THREE.Mesh(mergeGeometries(bgeoms)!, this.buildingMat));
+      // High uses the lit-window facade shader; Low/Medium a flat material (far cheaper per pixel)
+      if (bgeoms.length) g.add(new THREE.Mesh(mergeGeometries(bgeoms)!, this.quality === 'high' ? this.buildingMat : this.ctxBuildingMat));
       bgeoms.forEach((x) => x.dispose());
       const flat: THREE.BufferGeometry[] = [];
       for (const w of t.water) {
@@ -1101,6 +1283,7 @@ export class Engine implements WorldRenderer {
     // the detailed zone is small, so it stays visible as far as the city ring (no hole when zoomed out)
     const farCtx = { low: 4500, medium: 7000, high: 11000 }[this.quality];
     const far = farCtx;
+    const nearDetail = { low: 500, medium: 900, high: 1400 }[this.quality];
     const cam = this.camera.position;
     for (const c of this.ctxTiles.values()) {
       for (const m of c.group.children as THREE.Mesh[]) {
@@ -1114,7 +1297,9 @@ export class Engine implements WorldRenderer {
         const g = c.pick.mesh.geometry;
         if (!g.boundingSphere) g.computeBoundingSphere();
         const bs = g.boundingSphere!;
-        c.pick.mesh.visible = cam.distanceTo(bs.center) - bs.radius < far;
+        const d = cam.distanceTo(bs.center) - bs.radius;
+        c.pick.mesh.visible = d < far;
+        for (const ch of c.pick.mesh.children) if (ch.userData.detail) ch.visible = d < nearDetail;
       }
     }
   }
@@ -1189,6 +1374,7 @@ export class Engine implements WorldRenderer {
     this.updateAgents();
     this.updateSignals();
     this.updateTraffic(dt);
+    this.runWork(this.quality === 'low' ? 6 : 10);
     this.cullChunks(dt);
     this.updateWeather(dt);
     this.updateCamera(dt);
@@ -1339,6 +1525,7 @@ export class Engine implements WorldRenderer {
     this.sun.color.setHex(0xfff1dc).lerp(SKY_DUSK, dusk * 0.6);
     this.hemi.intensity = 0.25 + 0.75 * day;
     this.night.value = 1 - day;
+    LAMP_MAT.color.setHex(0x55585e).lerp(LAMP_ON, Math.min(1, (1 - day) * 1.4));
     const bg = SKY_NIGHT.clone().lerp(SKY_DAY, day).lerp(SKY_DUSK, dusk * 0.55);
     if (this.weather !== 'clear') bg.lerp(new THREE.Color(this.weather === 'snow' ? 0xdfe5ea : 0x8d97a3), 0.6 * day + 0.2);
     this.scene.background = bg;
@@ -1388,7 +1575,7 @@ export class Engine implements WorldRenderer {
       }
     }
     const info = this.renderer.info.render;
-    this.cb.onPerf({ fps, pixelRatio: this.pixelRatio, drawCalls: info.calls, triangles: info.triangles, quality: this.quality, frameMs });
+    this.cb.onPerf({ fps, pixelRatio: this.pixelRatio, drawCalls: info.calls, triangles: info.triangles, quality: this.quality, frameMs, pending: this.work.size });
   }
 
   private resize() {

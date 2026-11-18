@@ -189,6 +189,9 @@ export type SignalState = 'green' | 'yellow' | 'red';
 export interface SignalHead {
   x: number;
   y: number;
+  cx: number; // intersection node
+  cy: number;
+  hw: number; // half width of the approach road
   hx: number;
   hy: number;
   offset: number;
@@ -417,6 +420,9 @@ export class Simulation {
       out.push({
         x: p[0] - e.dir[0] * 4 + e.dir[1] * off,
         y: p[1] - e.dir[1] * 4 - e.dir[0] * off,
+        cx: p[0],
+        cy: p[1],
+        hw: e.halfWidth,
         hx: e.dir[0],
         hy: e.dir[1],
         offset: sig.offset,

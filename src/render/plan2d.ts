@@ -370,25 +370,30 @@ export class Plan2D implements WorldRenderer {
       if (this.selected?.type === 'agent') this.refreshSelection();
     }
     if (this.perfT >= 1) {
-      this.cb.onPerf({ fps: this.frames / this.perfT, pixelRatio: 1, drawCalls: 0, triangles: 0, quality: 'low', frameMs: this.busy / Math.max(1, this.frames) });
+      this.cb.onPerf({ fps: this.frames / this.perfT, pixelRatio: 1, drawCalls: 0, triangles: 0, quality: 'low', frameMs: this.busy / Math.max(1, this.frames), pending: 0 });
       this.busy = 0;
       this.perfT = 0;
       this.frames = 0;
     }
   };
 
-  private ctx2d: { buildings: Path2D; roads: Path2D; water: Path2D; green: Path2D } | null = null;
+  // City ring in 2D: one Path2D set per vector tile, so off-screen tiles are skipped entirely.
+  private ctx2d: { c: Vec2; buildings: Path2D; roads: Path2D; water: Path2D; green: Path2D }[] = [];
+  private ctxSig = '';
 
   setContext(tiles: ContextTile[], detail: DetailZone) {
-    const out = { buildings: new Path2D(), roads: new Path2D(), water: new Path2D(), green: new Path2D() };
+    const sig = `${tiles.length}|${detail.radius}|${detail.tiles.length}`;
+    if (sig === this.ctxSig) return;
+    this.ctxSig = sig;
     const outside = (p: Vec2) => !inDetail(detail, p);
-    for (const t of tiles) {
+    this.ctx2d = tiles.map((t) => {
+      const out = { c: t.center, buildings: new Path2D(), roads: new Path2D(), water: new Path2D(), green: new Path2D() };
       for (const b of t.buildings) if (outside(b.ring[0])) out.buildings.addPath(this.polyPath(b.ring));
       for (const w of t.water) if (outside(w[0])) out.water.addPath(this.polyPath(w));
       for (const g of t.green) if (outside(g[0])) out.green.addPath(this.polyPath(g));
       for (const r of t.roads) if (outside(r.points[0])) out.roads.addPath(this.linePath(r.points));
-    }
-    this.ctx2d = out;
+      return out;
+    });
     this.version++;
   }
 
@@ -494,21 +499,30 @@ export class Plan2D implements WorldRenderer {
     ctx.setTransform(s, 0, 0, -s, W / 2 - this.cx * s, H / 2 + this.cy * s);
     const w = this.world;
     if (!w) return;
-    if (this.ctx2d) {
+    if (this.ctx2d.length) {
       ctx.fillStyle = '#ddd7ca';
       ctx.beginPath();
       ctx.arc(0, 0, CONTEXT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#a6c98c';
-      ctx.fill(this.ctx2d.green);
-      ctx.fillStyle = '#6fa6d0';
-      ctx.fill(this.ctx2d.water);
-      ctx.strokeStyle = '#7d858f';
-      ctx.lineWidth = Math.max(6, px);
+      // visible window in metres (+ one tile of margin)
+      const halfW = W / s / 2 + 1500;
+      const halfH = H / s / 2 + 1500;
+      const vis = this.ctx2d.filter((t) => Math.abs(t.c[0] - this.cx) < halfW && Math.abs(t.c[1] - this.cy) < halfH);
       ctx.lineCap = 'round';
-      ctx.stroke(this.ctx2d.roads);
-      ctx.fillStyle = '#cfc6b6';
-      ctx.fill(this.ctx2d.buildings);
+      for (const t of vis) {
+        ctx.fillStyle = '#a6c98c';
+        ctx.fill(t.green);
+        ctx.fillStyle = '#6fa6d0';
+        ctx.fill(t.water);
+        ctx.strokeStyle = '#7d858f';
+        ctx.lineWidth = Math.max(6, px);
+        ctx.stroke(t.roads);
+        // individual footprints are sub-pixel when zoomed far out: skip them there
+        if (this.scale > 0.12) {
+          ctx.fillStyle = '#cfc6b6';
+          ctx.fill(t.buildings);
+        }
+      }
     }
     ctx.fillStyle = '#e6e0d3';
     ctx.beginPath();

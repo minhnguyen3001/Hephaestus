@@ -7,7 +7,7 @@ Priorities: **P0** critical · **P1** high · **P2** medium · **P3** future. Up
 - **GitHub on autopilot.** Commit, push and merge to `main` automatically.
 
 ## Awaiting owner decision
-- [x] Name: **Hephaestus** (owner, 2026-11-17)
+- [x] Name: **Ptah** (owner, 2026-11-17)
 - [x] Hosting: repo goes public, deployed free to GitHub Pages via Actions
 
 ## P0

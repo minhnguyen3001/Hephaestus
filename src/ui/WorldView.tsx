@@ -348,7 +348,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     if (!baseReady) return;
     const center = { lat: project.place.lat, lon: project.place.lon };
     const ctrl = new AbortController();
-    const queue = contextTileKeys(center, CONTEXT_RADIUS);
+    const queue = contextTileKeys(center, PRESETS[resolveQuality(quality)].ring);
     const done: ContextTile[] = [];
     let active = 0;
     const next = () => {
@@ -372,7 +372,8 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       ctrl.abort();
       clearInterval(flush);
     };
-  }, [baseReady, project.place.lat, project.place.lon]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseReady, project.place.lat, project.place.lon, quality]);
 
   const terrainRef = base?.terrain;
   useEffect(() => {
@@ -481,7 +482,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       <div className="viewport" ref={host} />
 
       <header className="topbar">
-        <button className="brand small" onClick={onExit} title="Back to start"><span className="logo" /><span className="hide-sm">Hephaestus</span></button>
+        <button className="brand small" onClick={onExit} title="Back to start"><span className="logo" /><span className="hide-sm">Ptah</span></button>
         <div className="project">
           <input
             value={project.name}
@@ -649,6 +650,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       <footer className="attribution">
         {base && <span className="hide-sm">{fmt(base.buildings.length)} buildings · {originalMetrics ? Math.round(originalMetrics.estimatedHeights * 100) : 0}% heights estimated · </span>}
         {tiles && <span className="hide-sm">map {tiles.loaded}/{tiles.budget} km²{tiles.pending ? ` · loading ${tiles.pending}…` : ''} · </span>}
+        {perf && perf.pending > 0 && <span className="hide-sm">building scene… · </span>}
         {perf && <span className="hide-sm">{Math.round(perf.fps)} fps · {perf.frameMs.toFixed(1)} ms · {perf.quality} · </span>}
         Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
         {ctxTiles.length > 0 && <> · <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a></>}

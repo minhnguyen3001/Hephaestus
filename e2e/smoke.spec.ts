@@ -21,7 +21,8 @@ test('load a real city, inspect, edit, undo, simulate', async ({ page }) => {
   const agents = page.locator('.kinds');
   await expect(agents).toContainText('Cars');
   const total = async () => (await agents.locator('b').allInnerTexts()).reduce((s, x) => s + Number(x), 0);
-  expect(await total()).toBeGreaterThan(20);
+  // streamed tiles may restart the simulation once, so give it time to repopulate
+  await expect.poll(total, { timeout: 20_000 }).toBeGreaterThan(20);
 
   // Click near the center to select something and confirm the inspector opens.
   const box = (await page.locator('.viewport canvas').boundingBox())!;
@@ -201,10 +202,12 @@ test('zone an area and see buildings and capacity appear', async ({ page }) => {
   await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
   await page.getByRole('button', { name: 'Aerial' }).click();
   await page.getByRole('button', { name: 'Zone area' }).click();
-  await page.getByLabel('Zone use').selectOption('mixed');
+  await page.getByLabel('Zone use').selectOption('residential');
   await page.getByRole('button', { name: 'High' }).click();
+  // the city now extends past the start circle, so redevelop existing blocks (replace) near the centre
+  await page.getByLabel('Replace existing').check();
   const box = (await page.locator('.viewport canvas').boundingBox())!;
-  for (const [x, y] of [[110, 300], [300, 300], [300, 480], [110, 480]]) await page.mouse.click(box.x + x, box.y + y);
+  for (const [fx, fy] of [[0.42, 0.42], [0.58, 0.42], [0.58, 0.58], [0.42, 0.58]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
   await page.getByRole('button', { name: 'Finish zone' }).click();
   await expect(page.locator('.dashboard .metric').filter({ hasText: 'Housing capacity' })).toContainText('+');
   await page.screenshot({ path: 'test-results/15-zone-2d.png' });
