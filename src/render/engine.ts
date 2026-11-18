@@ -191,6 +191,7 @@ export class Engine implements WorldRenderer {
   private region?: RegionProfile;
   sim?: SimClient;
   private roadSignature = '';
+  private simRestart?: ReturnType<typeof setTimeout>;
   running = true;
   speed = 1;
   private tools = new ToolController({
@@ -353,9 +354,14 @@ export class Engine implements WorldRenderer {
     const first = !this.world;
     this.world = world;
     const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}:${+!!r.bikeLane}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
-    if (!this.sim || sig !== this.roadSignature || region !== this.region) {
+    if (!this.sim || region !== this.region) {
       this.startSim(world, region, 1);
       this.roadSignature = sig;
+    } else if (sig !== this.roadSignature) {
+      // Network changed (edit or streamed tiles): restart once things settle; the current city keeps moving.
+      this.roadSignature = sig;
+      clearTimeout(this.simRestart);
+      this.simRestart = setTimeout(() => this.world && this.region && !this.disposed && this.startSim(this.world, this.region, 1), 2000);
     }
     this.region = region;
     this.buildStatic();
@@ -448,6 +454,7 @@ export class Engine implements WorldRenderer {
 
   dispose() {
     this.disposed = true;
+    clearTimeout(this.simRestart);
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     const c = this.renderer.domElement;

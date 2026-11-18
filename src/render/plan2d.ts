@@ -41,6 +41,7 @@ export class Plan2D implements WorldRenderer {
   private region?: RegionProfile;
   private sim?: SimClient;
   private roadSig = '';
+  private simRestart?: ReturnType<typeof setTimeout>;
   private cx = 0;
   private cy = 0;
   private scale = 1; // px per meter
@@ -103,7 +104,11 @@ export class Plan2D implements WorldRenderer {
     const first = !this.world;
     this.world = world;
     const sig = world.roads.map((r) => `${r.id}:${r.kind}:${r.lanes}:${+r.oneway}:${r.maxspeedKmh}:${+!!r.bikeLane}`).join('|') + region.id + JSON.stringify(world.transitLines ?? []) + (world.stations?.length ?? 0);
-    if (!this.sim || sig !== this.roadSig || region !== this.region) this.startSim(world, region, 1);
+    if (!this.sim || region !== this.region) this.startSim(world, region, 1);
+    else if (sig !== this.roadSig) {
+      clearTimeout(this.simRestart);
+      this.simRestart = setTimeout(() => this.world && this.region && this.startSim(this.world, this.region, 1), 2000);
+    }
     this.roadSig = sig;
     this.region = region;
     this.buildPaths();
@@ -216,6 +221,7 @@ export class Plan2D implements WorldRenderer {
   }
 
   dispose() {
+    clearTimeout(this.simRestart);
     cancelAnimationFrame(this.raf);
     this.ro.disconnect();
     this.sim?.dispose();
