@@ -162,8 +162,15 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .share i { display: block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #6aa8ff); }
 .share b { text-align: right; font-weight: 500; }
 
-.simbar { left: 50%; transform: translateX(-50%); bottom: 26px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; z-index: 5; width: min(860px, calc(100% - 28px)); }
+.simbar { left: 50%; transform: translateX(-50%); bottom: 26px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; z-index: 5; width: min(1000px, calc(100% - 28px)); }
+.simbar .traffic.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.hourly { margin: 10px 0 4px; }
+.hourly-bars { display: flex; align-items: flex-end; gap: 2px; height: 48px; }
+.hourly-bars span { flex: 1; background: rgba(255,255,255,0.12); border-radius: 2px 2px 0 0; }
+.hourly-bars span.now { outline: 1px solid var(--accent); }
+.hourly-axis { display: flex; justify-content: space-between; font-size: 10px; opacity: 0.6; margin-top: 2px; }
 .simbar select { padding: 6px 8px; }
+.simbar select[aria-label="Jump to time"] { width: 104px; }
 .simbar .play { width: 40px; height: 36px; padding: 0; background: var(--accent); color: var(--accent-ink); border: none; font-size: 13px; }
 .clock { font: 600 18px var(--display); font-variant-numeric: tabular-nums; min-width: 56px; }
 .time { flex: 1; accent-color: var(--accent); min-width: 60px; }

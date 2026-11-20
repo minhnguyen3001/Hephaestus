@@ -12,6 +12,8 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [ ] 3D High in dense cities needs a real-GPU check (software GL is too noisy to judge)
 
 ## P1
+- [x] Sidewalks stop at junctions instead of crossing them; inspector speed no longer stuck at 0 km/h (2026-11-20)
+- [x] Traffic by time of day: "Jump to…" (now, rush hours, night) re-seeds traffic for that hour; Traffic button in the sim bar; congestion-by-hour chart in the dashboard (2026-11-20)
 - [x] City-ring buildings: click to inspect (height, footprint, source); “Load detail here” streams that tile first; editing tools explain they're view-only (2026-11-20)
 - [ ] 2D plan view: ring buildings are not pickable yet (3D only)
 - [ ] Pre-build reach-2 detail tiles (5×5 km) for featured cities if `public/` stays well under 1 GB (currently 86 MB)
@@ -48,4 +50,4 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [x] Performance: chunked incremental scene, culled picking, heightfield ground pick, time-sliced building, quality-scaled ring
 - [x] 2D plan view, phone layout, interactive tour, WebGL context-loss recovery
 - [x] Renamed to **Ptah**; repo renamed; deployed free at https://minhnguyen3001.github.io/Ptah/
-- [x] 44 unit tests; 17 smoke e2e + phone + Pages check + perf benchmark
+- [x] 47 unit tests; 18 smoke e2e + phone + Pages check + perf benchmark

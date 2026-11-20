@@ -180,6 +180,17 @@ describe('simulation', () => {
     expect(sim.stats().tripsCompleted).toBeGreaterThan(20);
   });
 
+  it('re-seeds traffic when the clock jumps to another hour', () => {
+    const sim = new Simulation(gridFixture(), profileFor('us'), 300, 3);
+    sim.jumpTo(8 * 3600);
+    sim.step(20);
+    const rush = sim.agents.filter((a) => !a.bus).length;
+    sim.jumpTo(3 * 3600);
+    expect(sim.time).toBe(3 * 3600);
+    sim.step(1);
+    expect(sim.agents.filter((a) => !a.bus).length).toBeLessThan(rush * 0.6);
+  });
+
   it('warms up in bounded batches so no single tick stalls', () => {
     const sim = new Simulation(gridFixture(), profileFor('us'), 900, 2);
     const buses = sim.agents.length;

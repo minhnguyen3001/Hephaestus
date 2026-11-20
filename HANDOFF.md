@@ -10,7 +10,7 @@ Last updated: 2026-11-20, at commit `0515d7e` on `main`, pushed and deployed.
 ## New-session procedure
 1. Read this file, then `TODO.md`, then `README.md`.
 2. Run `git status` and `git log --oneline -15`. Check this file still matches the repo.
-3. Run `npm install && npm test && npm run build`. Expect 45 unit tests passing.
+3. Run `npm install && npm test && npm run build`. Expect 47 unit tests passing.
 4. Pick the top unchecked item in `TODO.md`. Don't redesign the architecture; the reasons behind it are in `docs/DECISIONS.md`.
 
 ## Owner rules (standing)
@@ -45,6 +45,7 @@ Last updated: 2026-11-20, at commit `0515d7e` on `main`, pushed and deployed.
   - Emergency vehicles, taxi pickups, parking search, and weekday/weekend/holiday demand.
   - +5/10/20-year projections and weather effects.
   - Buses and user metros with riders and transfers, and **real OSM rail/subway lines that stop at mapped stations**.
+- **Time of day.** "Jump to…" in the sim bar (Now ≈ local solar time from longitude, 08:00, 12:00, 17:30, 22:00, 03:00). `Simulation.jumpTo` re-seeds traffic mid-trip when the jump is over 30 min. The Traffic button toggles the speed-coloured flow layer; the dashboard charts congestion per simulated hour.
 - **Insight.** Before/after dashboard, access metrics, per-line ridership, traffic flow layer, rule-based advisor with fly-to, planning challenges and the interactive tour.
 
 ## Architecture map
@@ -71,12 +72,14 @@ How the pieces connect: React owns project, history and view state. It calls `re
 - Check the Pages build locally with `npm run build:pages && npx playwright test -c playwright.pages.config.ts`.
 
 ## Testing
-- `npm test`: 45 unit tests (Vitest), all passing.
+- `npm test`: 47 unit tests (Vitest), all passing.
 - `npx playwright test e2e/smoke.spec.ts e2e/mobile.spec.ts`: 18 smoke scenarios plus 1 phone scenario, all passing at last run. They need internet for terrain and the city ring. The Playwright `webServer` rebuilds `dist` with base `/`.
 - `npx playwright test e2e/perf.spec.ts`: throttled benchmark, written to `test-results/perf.json`. Last steady-state result under 4× CPU throttle: 2D 3 ms, 3D Low 6 ms, 3D High 23 ms per frame.
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader understates fps, so main-thread ms is the metric to watch.
 
 ## Gotchas
+- Sidewalks are split at junction nodes (shared by 2+ non-footway roads) and trimmed back by the widest meeting street + 3.5 m (`trimLine` in geometry.ts).
+- `SimClient.watch(id)` must ignore repeat calls for the same id, or the inspector loses its info every refresh (it showed 0 km/h).
 - Public Overpass mirrors are slow or flaky. Packs and tiles exist to avoid them, and the builders retry with backoff.
 - Don't send a browser-like User-Agent from scripts. Use the honest UA strings already in the scripts.
 - City-ring tiles are built in quarters keyed `tile#0..3`. Up-to-date checks must use the quarter key (a bare-key check caused an endless rebuild loop, fixed 2026-11-20).

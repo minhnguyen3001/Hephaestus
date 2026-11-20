@@ -175,7 +175,7 @@ function AgentInspector({ a, following, onFollow }: { a: AgentInfo; following: b
 }
 
 export function SimBar({
-  stats, running, speed, onRun, onSpeed, onTime, onReset, day, onDay, horizon, onHorizon, growth, weather, onWeather,
+  stats, running, speed, onRun, onSpeed, onTime, onReset, day, onDay, horizon, onHorizon, growth, weather, onWeather, lon, traffic, onTraffic,
 }: {
   stats: SimStats | null;
   running: boolean;
@@ -191,7 +191,15 @@ export function SimBar({
   growth: number;
   weather: Weather;
   onWeather: (w: Weather) => void;
+  lon: number;
+  traffic: boolean;
+  onTraffic: (on: boolean) => void;
 }) {
+  // local clock from longitude (solar time): close to the real time zone, not exact
+  const localNow = () => {
+    const d = new Date();
+    return ((((d.getUTCHours() * 3600 + d.getUTCMinutes() * 60 + lon * 240) % 86400) + 86400) % 86400);
+  };
   const t = stats?.time ?? 0;
   const hh = String(Math.floor(t / 3600)).padStart(2, '0');
   const mm = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
@@ -200,6 +208,18 @@ export function SimBar({
       <button className="play" onClick={() => onRun(!running)} aria-label={running ? 'Pause' : 'Play'}>{running ? '❚❚' : '▶'}</button>
       <div className="clock">{hh}:{mm}</div>
       <input type="range" min={0} max={86399} step={300} value={t} onChange={(e) => onTime(+e.target.value)} aria-label="Time of day" className="time" />
+      <select value="" onChange={(e) => e.target.value && onTime(e.target.value === 'now' ? localNow() : +e.target.value)} aria-label="Jump to time"
+        title="Jump the simulation to a time of day. Traffic is re-seeded for that hour.">
+        <option value="">Jump to…</option>
+        <option value="now">Now (approx. local)</option>
+        <option value={8 * 3600}>08:00 morning rush</option>
+        <option value={12 * 3600}>12:00 midday</option>
+        <option value={17.5 * 3600}>17:30 evening rush</option>
+        <option value={22 * 3600}>22:00 night</option>
+        <option value={3 * 3600}>03:00 overnight</option>
+      </select>
+      <button className={traffic ? 'on traffic' : 'ghost traffic'} aria-pressed={traffic} onClick={() => onTraffic(!traffic)}
+        title="Colour streets by live vehicle speed: green flowing, red jammed">Traffic</button>
       <div className="seg" role="group" aria-label="Simulation speed">
         {[1, 5, 20, 60].map((s) => (
           <button key={s} className={speed === s ? 'on' : ''} onClick={() => onSpeed(s)}>{s}×</button>
@@ -228,7 +248,23 @@ export function SimBar({
   );
 }
 
-export function Dashboard({ stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
+/** Congestion by simulated hour, filled in as the clock passes each hour (or you jump to it). */
+function HourlyCongestion({ hourly, now }: { hourly: (number | null)[]; now: number }) {
+  if (!hourly.some((v) => v !== null)) return null;
+  return (
+    <div className="hourly" role="img" aria-label="Congested vehicles by hour of day">
+      <div className="hourly-bars">
+        {hourly.map((v, h) => (
+          <span key={h} className={h === Math.floor(now / 3600) ? 'now' : ''} title={`${String(h).padStart(2, '0')}:00 ${v === null ? 'not simulated yet' : `${Math.round(v * 100)}% congested`}`}
+            style={{ height: v === null ? '2px' : `${Math.max(4, v * 100)}%`, background: v === null ? undefined : `hsl(${120 - Math.min(1, v * 2) * 120} 65% 45%)` }} />
+        ))}
+      </div>
+      <div className="hourly-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+    </div>
+  );
+}
+
+export function Dashboard({ hourly, stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { hourly?: (number | null)[]; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -363,6 +399,7 @@ export function Dashboard({ stats, proposed, original, region, editCount, compar
             <Metric label="Transfers" value={fmt(stats.transfers)} />
             <Metric label="Cruising for parking" value={fmt(stats.cruising)} warn={stats.cruising > 20} />
           </div>
+          {hourly && <HourlyCongestion hourly={hourly} now={stats.time} />}
           <div className="kinds">
             {AGENT_KINDS.map((k) => (
               <span key={k}>{KIND_LABEL[k]} <b>{stats.active[k]}</b></span>

@@ -129,7 +129,13 @@ test('traffic layer and signals (Manhattan pack)', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
   await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
-  await page.getByLabel('Traffic flow').check();
+  await expect(page.locator('.clock')).not.toHaveText('00:00', { timeout: 30_000 });
+  // jump to the evening rush and switch the flow colours on from the sim bar
+  await page.getByLabel('Jump to time').selectOption({ label: '17:30 evening rush' });
+  await expect(page.locator('.clock')).toHaveText(/^17:3/);
+  await page.getByRole('button', { name: 'Traffic', exact: true }).click();
+  await expect(page.getByLabel('Traffic flow')).toBeChecked();
+  await expect(page.locator('.hourly')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Hide dashboard' }).click();
   await page.getByRole('button', { name: '20×' }).click();
   await page.waitForTimeout(6000);

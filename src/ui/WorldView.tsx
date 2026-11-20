@@ -80,6 +80,13 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [events, setEvents] = useState<CityEvent[]>([]);
   const statsRef = useRef<SimStats | null>(null);
   statsRef.current = stats;
+  const hourlyRef = useRef<(number | null)[]>(Array(24).fill(null));
+  if (stats) {
+    // smoothed congestion per simulated hour, for the dashboard chart
+    const h = Math.floor(stats.time / 3600) % 24;
+    const prev = hourlyRef.current[h];
+    hourlyRef.current[h] = prev === null ? stats.congestion : prev * 0.9 + stats.congestion * 0.1;
+  }
   const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -596,7 +603,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon}
+        <Dashboard hourly={hourlyRef.current} stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon}
           challenge={project.challenge}
           suggestedChallenge={suggested(project.place.name, project.place.countryCode)?.id}
           onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
@@ -616,8 +623,9 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           engine.current?.setTime(t);
           if (stats) setStats({ ...stats, time: t });
         }}
-        onReset={() => engine.current?.resetSim()}
+        onReset={() => { hourlyRef.current = Array(24).fill(null); engine.current?.resetSim(); }}
         day={day} onDay={setDay} horizon={horizon} onHorizon={setHorizon} growth={region.growth} weather={weather} onWeather={setWeather}
+        lon={project.place.lon} traffic={layers.traffic} onTraffic={(on) => setLayers({ ...layers, traffic: on })}
       />
 
       {tool === 'transit' && editable && (

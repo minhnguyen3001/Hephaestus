@@ -107,7 +107,7 @@ export class SimClient {
   setTime(t: number) {
     this.time = t;
     if (this.inline) {
-      this.inline.time = t;
+      this.inline.jumpTo(t);
       this.receive(encodeFrame(this.inline, this.watched));
     } else this.post({ t: 'time', time: t });
   }
@@ -118,6 +118,8 @@ export class SimClient {
   }
 
   watch(id: number | null) {
+    // re-watching the same agent must not discard the info that already arrived (it showed 0 km/h)
+    if (id === this.watched) return;
     this.watched = id;
     this.watchedInfo = null;
     this.post({ t: 'watch', id });

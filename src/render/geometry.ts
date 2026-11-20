@@ -183,6 +183,21 @@ function normal(a: Vec2, b: Vec2): Vec2 | null {
   return l < 1e-6 ? null : [-dy / l, dx / l];
 }
 
+/** Cut `a` metres off the start and `b` metres off the end of a polyline (null if nothing is left). */
+export function trimLine(points: Vec2[], a: number, b: number): Vec2[] | null {
+  const cum = [0];
+  for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]));
+  const total = cum[cum.length - 1];
+  if (total - a - b < 1) return null;
+  const at = (d: number): Vec2 => {
+    let i = 1;
+    while (i < cum.length - 1 && cum[i] < d) i++;
+    const f = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+    return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * f, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * f];
+  };
+  return [at(a), ...points.filter((_, i) => cum[i] > a && cum[i] < total - b), at(total - b)];
+}
+
 /** A polyline shifted sideways by d meters (positive = left of travel direction). */
 export function offsetLine(points: Vec2[], d: number): Vec2[] {
   return points.map((p, i) => {

@@ -31,7 +31,8 @@ A browser-based 3D city-building and urban-planning simulator built on **real-wo
 - **Urban impact dashboard**:
   - Housing and job capacity, floor area, road length and buildings, compared before and after your edits.
   - Live traffic metrics and per-line transit ridership.
-  - A **traffic flow layer** colours roads by speed.
+  - A **traffic flow layer** colours roads by speed (the **Traffic** button in the sim bar).
+  - **Pick a time of day** (now, morning rush, midday, evening rush, night) and the simulation re-seeds traffic for that hour. A chart shows congestion by hour.
 - **Day/night cycle**: windows light up at night.
 - **Adaptive graphics**: Low, Medium, High and Auto.
 - Responsive layout for desktop, tablet and phone.

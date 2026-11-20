@@ -127,8 +127,10 @@ export class Plan2D implements WorldRenderer {
     if (restyle) this.buildPaths();
   }
 
+  private startTime = 7.5 * 3600;
   setTime(seconds: number) {
-    this.sim?.setTime(((seconds % 86400) + 86400) % 86400);
+    this.startTime = ((seconds % 86400) + 86400) % 86400; // kept for a simulation that hasn't started yet
+    this.sim?.setTime(this.startTime);
   }
 
   resetSim() {
@@ -233,7 +235,7 @@ export class Plan2D implements WorldRenderer {
   // ---------- internals ----------
 
   private startSim(world: WorldData, region: RegionProfile, seed: number) {
-    const time = this.sim?.time ?? 7.5 * 3600;
+    const time = this.sim?.time ?? this.startTime;
     this.sim?.dispose();
     // The plan view is the low-end path, so it uses the low agent budget.
     this.sim = new SimClient(world, region, PRESETS.low.maxAgents, seed, time);

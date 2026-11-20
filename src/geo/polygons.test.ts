@@ -40,4 +40,10 @@ describe('polygons', () => {
     expect(r.islands).toHaveLength(1);
     expect(r.water).toHaveLength(1); // whole box is sea around the island
   });
+
+  it('trims polylines from both ends', async () => {
+    const { trimLine } = await import('../render/geometry');
+    expect(trimLine([[0, 0], [10, 0], [10, 10]], 2, 3)).toEqual([[2, 0], [10, 0], [10, 7]]);
+    expect(trimLine([[0, 0], [5, 0]], 3, 3)).toBeNull();
+  });
 });

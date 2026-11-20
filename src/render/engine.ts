@@ -16,7 +16,7 @@ import type { AgentView } from '../sim/protocol';
 import { AGENT_KINDS, signalPhase, type AgentInfo, type AgentKind, type CityEvent, type SimParams, type SimStats, type Weather } from '../sim/simulation';
 
 export type { AgentInfo };
-import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, pitchedRoof, polygonGeometry, ribbonGeometry, v3, type BuildingStyle } from './geometry';
+import { agentGeometry, buildingColor, buildingGeometry, offsetLine, PickMesh, pitchedRoof, polygonGeometry, ribbonGeometry, trimLine, v3, type BuildingStyle } from './geometry';
 import { PRESETS, resolveQuality, type Quality, type QualitySetting } from './quality';
 import { pickMode, ToolController, type Tool, type ZoneOptions } from './tools';
 import { ZONE_COLORS } from './palette';
@@ -418,8 +418,10 @@ export class Engine implements WorldRenderer {
     if (restyle && this.world) this.buildStatic();
   }
 
+  private startTime = 7.5 * 3600;
   setTime(seconds: number) {
-    this.sim?.setTime(((seconds % 86400) + 86400) % 86400);
+    this.startTime = ((seconds % 86400) + 86400) % 86400; // kept for a simulation that hasn't started yet
+    this.sim?.setTime(this.startTime);
   }
 
   resetSim() {
@@ -427,7 +429,7 @@ export class Engine implements WorldRenderer {
   }
 
   private startSim(world: WorldData, region: RegionProfile, seed: number) {
-    const time = this.sim?.time ?? 7.5 * 3600;
+    const time = this.sim?.time ?? this.startTime;
     this.sim?.dispose();
     this.sim = new SimClient(world, region, PRESETS[this.quality].maxAgents, seed, time);
     this.sim.setParams(this.simParams);
@@ -743,6 +745,20 @@ export class Engine implements WorldRenderer {
     }
 
     const mark = new THREE.Color(0xeae3c9);
+    // junction node → how far sidewalks stop short of it (widest street meeting there + corner)
+    const seen = new Map<string, { n: number; hw: number }>();
+    for (const rd of w.roads) {
+      if (rd.kind === 'footway' || rd.kind === 'cycleway' || rd.tunnel) continue;
+      const hw = roadWidth(rd) / 2;
+      for (const n of rd.nodes) {
+        const e = seen.get(n) ?? { n: 0, hw: 0 };
+        e.n++;
+        e.hw = Math.max(e.hw, hw);
+        seen.set(n, e);
+      }
+    }
+    const junctions = new Map<string, number>();
+    for (const [n, e] of seen) if (e.n > 1) junctions.set(n, e.hw + 3.5);
     this.syncChunks(this.roadChunks, w.roads.filter((rd) => !rd.tunnel), (rd) => this.chunkKey(rd.points[0]), [t, q], (list) => {
       const items: { id: string; geom: THREE.BufferGeometry }[] = [];
       const lights: [number, number, number][] = [];
@@ -766,9 +782,19 @@ export class Engine implements WorldRenderer {
         // raised sidewalks along city streets
         if (SIDEWALK.has(road.kind) && !road.bridge) {
           const off = roadWidth(road) / 2 + 1.15;
-          for (const side of [-1, 1]) {
-            const sw = ribbonGeometry(offsetLine(road.points, side * off), 2.3, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.14, SIDEWALK_COLOR);
-            if (sw) items.push({ id: `${road.id}#m`, geom: sw });
+          // split at every junction and stop short of it, so sidewalks meet at the corner instead of crossing the street
+          const cuts = [0];
+          road.nodes.forEach((n, i) => i > 0 && i < road.nodes.length - 1 && junctions.has(n) && cuts.push(i));
+          cuts.push(road.points.length - 1);
+          for (let c = 1; c < cuts.length; c++) {
+            const [i0, i1] = [cuts[c - 1], cuts[c]];
+            const gapA = junctions.get(road.nodes[i0]) ?? 0;
+            const gapB = junctions.get(road.nodes[i1]) ?? 0;
+            for (const side of [-1, 1]) {
+              const line = trimLine(offsetLine(road.points.slice(i0, i1 + 1), side * off), gapA, gapB);
+              const sw = line && ribbonGeometry(line, 2.3, (p) => gh(p) + lift + ROAD_Y[road.kind] + 0.14, SIDEWALK_COLOR);
+              if (sw) items.push({ id: `${road.id}#m`, geom: sw });
+            }
           }
           // street lights every ~38 m, alternating sides
           let acc = 19;

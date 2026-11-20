@@ -879,6 +879,24 @@ export class Simulation {
     return true;
   }
 
+  /** Set the clock. A jump of more than 30 min re-seeds traffic for the new hour, so 08:00 looks like rush hour at once. */
+  jumpTo(t: number) {
+    const gap = Math.abs(((t - this.time + 129600) % 86400) - 43200);
+    this.time = ((t % 86400) + 86400) % 86400;
+    if (gap <= 1800) return;
+    const target = Math.round(this.maxAgents * Math.min(1.8, this.demandScale) * demandAt(this.time / 3600, this.day));
+    // drop surplus ordinary trips (never buses, riders or emergency calls); the next ticks spawn mid-trip up to demand
+    let movers = this.agents.filter((a) => !a.bus).length;
+    for (const a of this.agents) {
+      if (movers <= target) break;
+      if (a.bus || a.rider || a.kind === 'emergency') continue;
+      a.done = true;
+      movers--;
+    }
+    this.agents = this.agents.filter((a) => !a.done);
+    this.filled = false;
+  }
+
   // ---------- stepping ----------
 
   /** Advance the simulation by dt seconds of simulated time (internally sub-stepped). */

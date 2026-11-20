@@ -24,7 +24,7 @@ function handle(m: ToWorker) {
     self.postMessage(infoOf(sim));
   } else if (!sim) return;
   else if (m.t === 'step') sim.step(m.dt);
-  else if (m.t === 'time') sim.time = m.time;
+  else if (m.t === 'time') sim.jumpTo(m.time);
   else if (m.t === 'watch') watched = m.id;
   else if (m.t === 'params') sim.setParams(m.params);
   const frame = encodeFrame(sim, watched, frames++ % 15 === 0);
