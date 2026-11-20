@@ -1,6 +1,7 @@
 import type { Area, Building, Vec2, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
 import { clipPolygonRect, coastlineWater, isClosed, joinWays } from './polygons';
 import { hash01, makeProjection, pointInPolygon, signedArea } from './util';
+import { offThread } from './offthread';
 
 /**
  * OpenStreetMap provider (via Overpass API). Data © OpenStreetMap contributors, ODbL.
@@ -448,7 +449,11 @@ export async function fetchTile(center: LatLon, i: number, j: number, signal?: A
   // Pre-built tiles for featured cities are static files: instant, and no load on public servers.
   try {
     const r = await fetch(`${baseUrl()}tiles/${packFile(center).replace('.json', '')}/${i}_${j}.json`, { signal });
-    if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) return parseOverpass({ elements: await r.json() }, center, TILE, b, `@${i},${j}`);
+    if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) {
+      const buf = await r.arrayBuffer();
+      const tag = `@${i},${j}`;
+      return await offThread({ kind: 'overpass', buf, center, radius: TILE, bounds: b, tag }, () => parseOverpass({ elements: JSON.parse(new TextDecoder().decode(buf)) }, center, TILE, b, tag));
+    }
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e;
   }

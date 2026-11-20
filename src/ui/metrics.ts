@@ -1,4 +1,4 @@
-import type { Vec2, WorldData } from '../geo/types';
+import type { Building, Vec2, WorldData } from '../geo/types';
 import { centroid, makeNear, signedArea } from '../geo/util';
 import { buildingCapacity } from '../sim/simulation';
 
@@ -16,6 +16,18 @@ export interface CityMetrics {
 }
 
 
+// Buildings are immutable and shared between merges and scenarios, so their per-building figures are cached.
+const perBuilding = new WeakMap<Building, { residents: number; jobs: number; fa: number; c: Vec2 }>();
+function figures(b: Building) {
+  let f = perBuilding.get(b);
+  if (!f) {
+    const cap = buildingCapacity(b);
+    f = { residents: cap.residents, jobs: cap.jobs, fa: Math.abs(signedArea(b.footprint)) * Math.max(1, Math.round(b.height / 3.2)), c: centroid(b.footprint) };
+    perBuilding.set(b, f);
+  }
+  return f;
+}
+
 /** Planning indicators derived from a scenario. All capacity figures are model estimates. */
 export function cityMetrics(w: WorldData): CityMetrics {
   let residents = 0;
@@ -23,10 +35,10 @@ export function cityMetrics(w: WorldData): CityMetrics {
   let fa = 0;
   let est = 0;
   for (const b of w.buildings) {
-    const c = buildingCapacity(b);
-    residents += c.residents;
-    jobs += c.jobs;
-    fa += Math.abs(signedArea(b.footprint)) * Math.max(1, Math.round(b.height / 3.2));
+    const f = figures(b);
+    residents += f.residents;
+    jobs += f.jobs;
+    fa += f.fa;
     if (b.heightSource === 'estimated') est++;
   }
   // Access points: drawn transit stops, plus vertices along mapped above-ground rail (a stand-in for stations).
@@ -39,9 +51,8 @@ export function cityMetrics(w: WorldData): CityMetrics {
   let resTransit = 0;
   let resPark = 0;
   for (const b of w.buildings) {
-    const r = buildingCapacity(b).residents;
+    const { residents: r, c } = figures(b);
     if (!r) continue;
-    const c = centroid(b.footprint);
     res += r;
     if (nearStop(c)) resTransit += r;
     if (nearPark(c)) resPark += r;

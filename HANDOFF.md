@@ -78,6 +78,15 @@ How the pieces connect: React owns project, history and view state. It calls `re
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader understates fps, so main-thread ms is the metric to watch.
 
 ## Gotchas
+- **Latency rules** (2026-11-20, measured on an M2 at Retina scale, headed Chromium with `--use-angle=metal`):
+  - The shadow map refreshes on a schedule (`shadowMap.autoUpdate = false`): every 4th frame while the camera moves, every 30th when still. Agents don't cast shadows.
+  - High's pixel ratio is capped at 1.5. Auto quality steps down after 2 s below 45 fps.
+  - Whole-world layers (areas, rails, trees, underground) rebuild through the work queue via `defer()`, never synchronously in `setWorld`.
+  - The terrain mesh doesn't depend on the loaded radius. Area geometry is cached per `Area` object; `cityMetrics` caches per `Building`.
+  - City-ring tiles build in 4×4 parts. `ringIds` tracks ids per part, because scanning all `ringInfo` ids per part was quadratic.
+  - Streamed tile JSON and ring vector tiles are parsed in `src/geo/parse.worker.ts` (`offThread`, with an inline fallback).
+  - Result: 60 fps while panning, zooming and orbiting with 3000 agents. Main-thread work is about 3 ms per frame. Tasks over 50 ms after the first load: Chicago 0–1, Shibuya 3–4 (55–100 ms).
+  - Profile with a headed real-GPU Playwright config. SwiftShader numbers are meaningless for this.
 - Agent caps are 450/1300/3000 for Low/Medium/High (`quality.ts`). The simulation takes about 6 ms per step at 3000 agents, in the worker. `MAX_INSTANCES` is 4000 per agent kind.
 - At night, a cool moonlight and a stronger sky fill keep the map readable. The share of lit windows follows the hour (`lit` uniform): near 10% at 03:00, peaking in the evening. Distant windows blend to an average glow instead of static.
 - Sidewalks are split at junction nodes (shared by 2+ non-footway roads) and trimmed back by the widest meeting street + 3.5 m (`trimLine` in geometry.ts).

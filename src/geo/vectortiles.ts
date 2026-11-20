@@ -3,6 +3,7 @@ import Pbf from 'pbf';
 import { lonLatToTile } from './terrain';
 import type { LatLon, RoadKind, Vec2 } from './types';
 import { makeProjection, signedArea } from './util';
+import { offThread } from './offthread';
 
 /**
  * City ring: lightweight context out to ~5 km from OpenFreeMap vector tiles (OpenMapTiles schema,
@@ -62,7 +63,8 @@ export async function fetchContextTile(center: LatLon, x: number, y: number, sig
     if (!res.ok) throw new Error(`context tile ${res.status}`);
     await cache?.put(url, res.clone()).catch(() => undefined);
   }
-  return decodeContextTile(new Uint8Array(await res.arrayBuffer()), center, x, y);
+  const buf = await res.arrayBuffer();
+  return offThread({ kind: 'mvt', buf, center, x, y }, () => decodeContextTile(new Uint8Array(buf), center, x, y));
 }
 
 /** Decode a vector tile into local-metre geometry (pure; testable). */

@@ -75,11 +75,13 @@ export interface DetailZone {
   tiles: string[];
 }
 
-/** Split a city-ring tile into four quarter tiles (by feature position) with their own keys. */
+/** Split a city-ring tile into 4×4 parts (by feature position) with their own keys, so no single build stalls a frame. */
 function splitTile(t: ContextTile): ContextTile[] {
-  const q = (p: Vec2) => (p[0] >= t.center[0] ? 1 : 0) + (p[1] >= t.center[1] ? 2 : 0);
-  const parts = [0, 1, 2, 3].map((i) => ({
-    key: `${t.key}#${i}`, center: [t.center[0] + (i & 1 ? 450 : -450), t.center[1] + (i & 2 ? 450 : -450)] as Vec2,
+  const S = 4;
+  const cell = (v: number, c: number) => Math.max(0, Math.min(S - 1, Math.floor((v - c) / 450 + S / 2)));
+  const q = (p: Vec2) => cell(p[0], t.center[0]) + S * cell(p[1], t.center[1]);
+  const parts = Array.from({ length: S * S }, (_, i) => ({
+    key: `${t.key}#${i}`, center: [t.center[0] + ((i % S) - S / 2 + 0.5) * 450, t.center[1] + (Math.floor(i / S) - S / 2 + 0.5) * 450] as Vec2,
     buildings: [] as ContextTile['buildings'], roads: [] as ContextTile['roads'], water: [] as Vec2[][], green: [] as Vec2[][],
   }));
   for (const b of t.buildings) parts[q(b.ring[0])].buildings.push(b);
@@ -322,6 +324,7 @@ export class Engine implements WorldRenderer {
     this.renderer.toneMappingExposure = 0.85;
     this.renderer.shadowMap.enabled = preset.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false; // refreshed on a schedule in loop(): the shadow pass redraws the whole city
     const canvas = this.renderer.domElement;
     canvas.style.touchAction = 'none';
     canvas.tabIndex = 0;
@@ -352,7 +355,7 @@ export class Engine implements WorldRenderer {
       m.setColorAt(0, new THREE.Color());
       m.count = 0;
       m.frustumCulled = false;
-      m.castShadow = preset.shadows && k !== 'pedestrian';
+      m.castShadow = false; // thousands of moving agents would force a shadow redraw every frame; they still receive shadows
       m.userData.kind = k;
       this.agentMeshes[k] = m;
       this.agentSlots[k] = [];
@@ -596,6 +599,7 @@ export class Engine implements WorldRenderer {
   }
 
   private layerDeps = new Map<string, unknown[]>();
+  private areaGeo = new WeakMap<Area, { g: THREE.BufferGeometry | null; t: unknown; E: number; lift: number }>();
   private layers3d = new Map<string, THREE.Group>();
   private buildingChunks = new Map<string, { deps: unknown[]; pick: PickMesh }>();
   private roadChunks = new Map<string, { deps: unknown[]; pick: PickMesh }>();
@@ -681,7 +685,8 @@ export class Engine implements WorldRenderer {
     const q = this.quality;
     this.buildDecks(w);
 
-    const ground = this.layer('ground', [t, r, q]);
+    // terrain doesn't depend on the loaded radius, so streamed tiles don't rebuild (and re-normal) the whole ground
+    const ground = this.layer('ground', t ? [t, q] : [t, r, q]);
     if (ground) {
       if (t) {
         // Terrain mesh from the DEM grid, lighter inside the loaded data radius.
@@ -689,19 +694,9 @@ export class Engine implements WorldRenderer {
         const seg = Math.min(t.n - 1, { low: 110, medium: 180, high: 300 }[q]);
         const g = new THREE.PlaneGeometry(2 * t.extent, 2 * t.extent, seg, seg).rotateX(-Math.PI / 2);
         const pos = g.attributes.position;
-        const cols: number[] = [];
-        const inner = new THREE.Color(0xe6e0d3);
-        const outer = new THREE.Color(0xc9c2b1);
-        for (let i = 0; i < pos.count; i++) {
-          const x = pos.getX(i);
-          const y = -pos.getZ(i);
-          pos.setY(i, this.h(x, y));
-          const c = outer.clone().lerp(inner, THREE.MathUtils.smoothstep(r + 20 - Math.hypot(x, y), 0, 30));
-          cols.push(c.r, c.g, c.b);
-        }
-        g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+        for (let i = 0; i < pos.count; i++) pos.setY(i, this.h(pos.getX(i), -pos.getZ(i)));
         g.computeVertexNormals();
-        this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+        this.ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xe0dacd, roughness: 1 }));
         this.ground.receiveShadow = shadows;
         const skirt = new THREE.Mesh(new THREE.PlaneGeometry(r * 14, r * 14).rotateX(-Math.PI / 2).translate(0, t.min - 2, 0), new THREE.MeshStandardMaterial({ color: 0xc9c2b1, roughness: 1 }));
         skirt.userData.ground = true;
@@ -716,6 +711,8 @@ export class Engine implements WorldRenderer {
         ground.add(this.ground, disc, ring);
       }
       this.ground.userData.ground = true;
+    }
+    {
       // shadows cover the area around the camera (the sun follows the target), not the whole city
       const sr = Math.min(r * 1.1, 950);
       const sc = this.sun.shadow.camera;
@@ -732,23 +729,33 @@ export class Engine implements WorldRenderer {
         this.sun.shadow.map?.dispose();
         this.sun.shadow.map = null;
       }
-      this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9);
+      if (!this.scene.fog) this.scene.fog = new THREE.Fog(SKY_DAY, r * 2.5, r * 9); // updateSky sets the range each frame
     }
 
-    const areas = this.layer('areas', [t, r, ...w.areas]);
-    if (areas) {
-      const E = r * 1.3;
-      const areaColor = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
-      const geoms = w.areas
-        .map((a) => polygonGeometry(a.polygon, this.areaHeight(a, E, lift), new THREE.Color(areaColor[a.kind]), a.holes))
-        .filter((g): g is THREE.BufferGeometry => !!g);
-      if (geoms.length) {
-        const m = new THREE.Mesh(mergeGeometries(geoms)!, this.flatMat);
-        m.receiveShadow = shadows;
-        m.userData.ground = true;
-        areas.add(m);
+    this.defer('areas', () => {
+      const areas = this.layer('areas', [t, r, ...w.areas]);
+      if (areas) {
+        const E = r * 1.3;
+        const areaColor = { water: 0x6fa6d0, park: 0xa6c98c, land: 0xe0dacc };
+        // cache each polygon's triangulation: a streamed tile then only re-merges (sea depends on the world box E)
+        const geoms = w.areas
+          .map((a) => {
+            const c = this.areaGeo.get(a);
+            if (c && c.t === t && c.lift === lift && (!a.sea || c.E === E)) return c.g;
+            const g = polygonGeometry(a.polygon, this.areaHeight(a, E, lift), new THREE.Color(areaColor[a.kind]), a.holes);
+            this.areaGeo.set(a, { g, t, E, lift });
+            return g;
+          })
+          .filter((g): g is THREE.BufferGeometry => !!g);
+        if (geoms.length) {
+          const m = new THREE.Mesh(mergeGeometries(geoms)!, this.flatMat);
+          m.receiveShadow = shadows;
+          m.userData.ground = true;
+          areas.add(m);
+        }
       }
-    }
+      this.refreshGroundMats();
+    });
 
     const mark = new THREE.Color(0xeae3c9);
     // junction node → how far sidewalks stop short of it (widest street meeting there + corner)
@@ -837,67 +844,71 @@ export class Engine implements WorldRenderer {
       return pick;
     });
 
-    const rails = this.layer('rails', [t, q, w.rails]);
-    if (rails) {
-      const railGeoms: THREE.BufferGeometry[] = [];
-      const pillars: THREE.Vector3[] = [];
-      for (const rail of w.rails) {
-        if (rail.tunnel) continue;
-        const y = (p: Vec2) => this.hp(p) + (rail.elevated ? 7 : 0.15 + lift);
-        const g = ribbonGeometry(rail.points, rail.kind === 'tram' ? 1.8 : 2.8, y, new THREE.Color(rail.elevated ? 0x5b5450 : 0x6f625a));
-        if (g) railGeoms.push(g);
-        if (rail.elevated) {
-          for (let i = 1; i < rail.points.length; i++) {
-            const a = rail.points[i - 1];
-            const b = rail.points[i];
-            const n = Math.floor(dist(a, b) / 25);
-            for (let k = 0; k <= n; k++) pillars.push(v3([a[0] + ((b[0] - a[0]) * k) / Math.max(1, n), a[1] + ((b[1] - a[1]) * k) / Math.max(1, n)]));
+    this.defer('rails', () => {
+      const rails = this.layer('rails', [t, q, w.rails]);
+      if (rails) {
+        const railGeoms: THREE.BufferGeometry[] = [];
+        const pillars: THREE.Vector3[] = [];
+        for (const rail of w.rails) {
+          if (rail.tunnel) continue;
+          const y = (p: Vec2) => this.hp(p) + (rail.elevated ? 7 : 0.15 + lift);
+          const g = ribbonGeometry(rail.points, rail.kind === 'tram' ? 1.8 : 2.8, y, new THREE.Color(rail.elevated ? 0x5b5450 : 0x6f625a));
+          if (g) railGeoms.push(g);
+          if (rail.elevated) {
+            for (let i = 1; i < rail.points.length; i++) {
+              const a = rail.points[i - 1];
+              const b = rail.points[i];
+              const n = Math.floor(dist(a, b) / 25);
+              for (let k = 0; k <= n; k++) pillars.push(v3([a[0] + ((b[0] - a[0]) * k) / Math.max(1, n), a[1] + ((b[1] - a[1]) * k) / Math.max(1, n)]));
+            }
           }
         }
-      }
-      if (railGeoms.length) {
-        const m = new THREE.Mesh(mergeGeometries(railGeoms)!, this.flatMat);
-        m.castShadow = shadows;
-        rails.add(m);
-      }
-      if (pillars.length) {
-        const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x8b857d }), pillars.length);
-        pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p.setY(this.h(p.x, -p.z)))));
-        pm.castShadow = shadows;
-        rails.add(pm);
-      }
-    }
-
-    const treesG = this.layer('trees', [t, q, w.trees, ...w.areas]);
-    if (treesG) {
-      const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[q]);
-      if (trees.length) {
-        // ~30% conifers for variety; both species instanced
-        const jit = (x: number, y: number) => ((x * 73.1 + y * 37.7) % 1 + 1) % 1; // cheap stable jitter
-        const conifer = trees.filter((tr) => jit(tr.p[1], tr.p[0]) < 0.3);
-        const leafy = trees.filter((tr) => jit(tr.p[1], tr.p[0]) >= 0.3);
-        const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
-        const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
-        const sc = new THREE.Vector3();
-        const group = new THREE.Group();
-        for (const [list, geo, cols] of [[leafy, 'tree', greens], [conifer, 'conifer', [0x3f6b45, 0x4a7a4f, 0x355e3d]]] as const) {
-          if (!list.length) continue;
-          const tm = new THREE.InstancedMesh(agentGeometry(geo), mat, list.length);
-          list.forEach((tr, i) => {
-            const [x, y] = tr.p;
-            const k = jit(x, y);
-            this.tmpM.makeRotationY(k * 6.28).scale(sc.set(tr.scale, tr.scale * (0.9 + k * 0.3), tr.scale)).setPosition(x, this.h(x, y) + lift, -y);
-            tm.setMatrixAt(i, this.tmpM);
-            tm.setColorAt(i, this.tmpC.setHex(cols[i % cols.length]));
-          });
-          tm.castShadow = shadows;
-          group.add(tm);
+        if (railGeoms.length) {
+          const m = new THREE.Mesh(mergeGeometries(railGeoms)!, this.flatMat);
+          m.castShadow = shadows;
+          rails.add(m);
         }
-        this.treeMesh = group;
-        treesG.add(group);
-      } else this.treeMesh = undefined;
-    }
-    if (this.treeMesh) this.treeMesh.visible = this.layers.trees;
+        if (pillars.length) {
+          const pm = new THREE.InstancedMesh(agentGeometry('pillar'), new THREE.MeshStandardMaterial({ color: 0x8b857d }), pillars.length);
+          pillars.forEach((p, i) => pm.setMatrixAt(i, this.tmpM.makeScale(1, 7, 1).setPosition(p.setY(this.h(p.x, -p.z)))));
+          pm.castShadow = shadows;
+          rails.add(pm);
+        }
+      }
+    });
+
+    this.defer('trees', () => {
+      const treesG = this.layer('trees', [t, q, w.trees, ...w.areas]);
+      if (treesG) {
+        const trees = treePoints(w, { low: 1500, medium: 3500, high: 7000 }[q]);
+        if (trees.length) {
+          // ~30% conifers for variety; both species instanced
+          const jit = (x: number, y: number) => ((x * 73.1 + y * 37.7) % 1 + 1) % 1; // cheap stable jitter
+          const conifer = trees.filter((tr) => jit(tr.p[1], tr.p[0]) < 0.3);
+          const leafy = trees.filter((tr) => jit(tr.p[1], tr.p[0]) >= 0.3);
+          const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+          const greens = [0x5f8f4e, 0x6f9a52, 0x55804a, 0x7da35a, 0x4f7a45];
+          const sc = new THREE.Vector3();
+          const group = new THREE.Group();
+          for (const [list, geo, cols] of [[leafy, 'tree', greens], [conifer, 'conifer', [0x3f6b45, 0x4a7a4f, 0x355e3d]]] as const) {
+            if (!list.length) continue;
+            const tm = new THREE.InstancedMesh(agentGeometry(geo), mat, list.length);
+            list.forEach((tr, i) => {
+              const [x, y] = tr.p;
+              const k = jit(x, y);
+              this.tmpM.makeRotationY(k * 6.28).scale(sc.set(tr.scale, tr.scale * (0.9 + k * 0.3), tr.scale)).setPosition(x, this.h(x, y) + lift, -y);
+              tm.setMatrixAt(i, this.tmpM);
+              tm.setColorAt(i, this.tmpC.setHex(cols[i % cols.length]));
+            });
+            tm.castShadow = shadows;
+            group.add(tm);
+          }
+          this.treeMesh = group;
+          treesG.add(group);
+        } else this.treeMesh = undefined;
+      }
+      if (this.treeMesh) this.treeMesh.visible = this.layers.trees;
+    });
 
     const notes = this.layer('notes', [t, ...(w.notes ?? [])]);
     if (notes) for (const n of w.notes ?? []) notes.add(noteMarker(n.text, v3(n.p, this.hp(n.p))));
@@ -934,17 +945,28 @@ export class Engine implements WorldRenderer {
       return pick;
     });
 
-    const tunnelRoads = w.roads.filter((rd) => rd.tunnel && rd.kind !== 'footway' && rd.kind !== 'cycleway');
-    if (this.layer('underground', [t, w.rails, ...tunnelRoads])) {
-      this.clearGroup(this.undergroundGroup);
-      const tunnels = w.rails.filter((rl) => rl.tunnel).map((rl) => ribbonGeometry(rl.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
-      for (const rd of tunnelRoads) {
-        const g = ribbonGeometry(rd.points, roadWidth(rd), (p) => this.hp(p) - ROAD_TUNNEL, new THREE.Color(0x5a6270));
-        if (g) tunnels.push(g);
+    this.defer('underground', () => {
+      const tunnelRoads = w.roads.filter((rd) => rd.tunnel && rd.kind !== 'footway' && rd.kind !== 'cycleway');
+      if (this.layer('underground', [t, w.rails, ...tunnelRoads])) {
+        this.clearGroup(this.undergroundGroup);
+        const tunnels = w.rails.filter((rl) => rl.tunnel).map((rl) => ribbonGeometry(rl.points, 3.2, (p) => this.hp(p) - UNDER, new THREE.Color(0x9b59b6))).filter((g): g is THREE.BufferGeometry => !!g);
+        for (const rd of tunnelRoads) {
+          const g = ribbonGeometry(rd.points, roadWidth(rd), (p) => this.hp(p) - ROAD_TUNNEL, new THREE.Color(0x5a6270));
+          if (g) tunnels.push(g);
+        }
+        if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
       }
-      if (tunnels.length) this.undergroundGroup.add(new THREE.Mesh(mergeGeometries(tunnels)!, new THREE.MeshBasicMaterial({ vertexColors: true })));
-    }
+    });
 
+    this.refreshGroundMats();
+  }
+
+  /** Whole-world layers rebuild in the time-sliced queue (one per frame), so merging a streamed tile never stalls a frame. */
+  private defer(name: string, run: () => void) {
+    this.work.set(`s:${name}`, { at: [this.controls.target.x, -this.controls.target.z], run });
+  }
+
+  private refreshGroundMats() {
     // Ground materials go translucent in x-ray mode so tunnels show through.
     this.groundMats = [];
     this.worldGroup.traverse((o) => {
@@ -1234,6 +1256,7 @@ export class Engine implements WorldRenderer {
   private ctxBuildingMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   /** City-ring buildings by pick id, so they can be inspected (read-only). */
   private ringInfo = new Map<string, { b: Building; base: number }>();
+  private ringIds = new Map<string, string[]>();
   /** A building by id: detailed data first, then the city ring. */
   private findBuilding(id: string | number): { b: Building; base: number; overview: boolean } | null {
     const b = this.world?.buildings.find((x) => x.id === id);
@@ -1251,6 +1274,8 @@ export class Engine implements WorldRenderer {
       this.clearGroup(c.group);
       this.scene.remove(c.group);
       this.ctxTiles.delete(k);
+      for (const id of this.ringIds.get(k) ?? []) this.ringInfo.delete(id);
+      this.ringIds.delete(k);
     }
     const lift = this.lift;
     const terrainSig = this.world?.terrain ? 't' : 'f';
@@ -1279,7 +1304,9 @@ export class Engine implements WorldRenderer {
       const outside = (p: Vec2) => !inDetail(detail, p);
       // buildings: same facade shader as detailed ones, neutral palette, no shadows (cheap)
       const items: { id: string; geom: THREE.BufferGeometry }[] = [];
-      for (const id of this.ringInfo.keys()) if (id.startsWith(`ring:${t.key}:`)) this.ringInfo.delete(id);
+      for (const id of this.ringIds.get(t.key) ?? []) this.ringInfo.delete(id); // per-part list: scanning every ring id was quadratic
+      const ids: string[] = [];
+      this.ringIds.set(t.key, ids);
       const ringR = PRESETS[this.quality].ring;
       for (const b of t.buildings) {
         const c = centroid(b.ring);
@@ -1289,6 +1316,7 @@ export class Engine implements WorldRenderer {
         let base = Infinity;
         for (const p of b.ring) base = Math.min(base, this.hp(p));
         this.ringInfo.set(fake.id, { b: fake, base });
+        ids.push(fake.id);
         items.push({ id: fake.id, geom: buildingGeometry(fake, buildingColor(fake, { highlightEstimated: false }), base) });
       }
       // High uses the lit-window facade shader; Low/Medium a flat material (far cheaper per pixel)
@@ -1414,6 +1442,8 @@ export class Engine implements WorldRenderer {
   // ---------- per frame ----------
 
   private busy = 0;
+  private shadowFrames = 99;
+  private lastShadowCam = new THREE.Matrix4();
   private loop = () => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -1433,6 +1463,16 @@ export class Engine implements WorldRenderer {
     const floor = this.h(this.camera.position.x, -this.camera.position.z) + 1.5;
     if (this.camera.position.y < floor) this.camera.position.y = floor;
     this.updateSky();
+    // Buildings and terrain are static, so the shadow map can lag a few frames: every 4th frame while the
+    // camera moves (the shadow matrix stays consistent with its own map) and twice a second when still.
+    if (this.renderer.shadowMap.enabled) {
+      const moved = !this.camera.matrixWorld.equals(this.lastShadowCam);
+      if (++this.shadowFrames >= (moved ? 4 : 30)) {
+        this.renderer.shadowMap.needsUpdate = true;
+        this.shadowFrames = 0;
+        this.lastShadowCam.copy(this.camera.matrixWorld);
+      }
+    }
     this.renderer.render(this.scene, this.camera);
     this.busy += performance.now() - start;
     this.trackPerf(Math.min(raw, 5)); // real elapsed time: the 0.1 s animation cap made slow frames report inflated fps
@@ -1612,10 +1652,10 @@ export class Engine implements WorldRenderer {
     this.perfT = 0;
     if (this.qualitySetting === 'auto' && !document.hidden) {
       // Adaptive resolution: trade sharpness for frame rate before anything else.
-      this.slowSeconds = fps < 28 ? this.slowSeconds + 1 : 0;
+      this.slowSeconds = fps < 45 ? this.slowSeconds + 1 : 0; // react before it feels laggy, not after
       this.fastSeconds = fps > 55 ? this.fastSeconds + 1 : 0;
       const maxPr = Math.min(window.devicePixelRatio || 1, PRESETS[this.quality].pixelRatio);
-      if (this.slowSeconds >= 3 && this.pixelRatio > 0.6) {
+      if (this.slowSeconds >= 2 && this.pixelRatio > 0.6) {
         this.pixelRatio = Math.max(0.6, this.pixelRatio - 0.2);
         this.renderer.setPixelRatio(this.pixelRatio);
         this.slowSeconds = 0;
