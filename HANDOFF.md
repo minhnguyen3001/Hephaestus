@@ -74,10 +74,12 @@ How the pieces connect: React owns project, history and view state. It calls `re
 ## Testing
 - `npm test`: 47 unit tests (Vitest), all passing.
 - `npx playwright test e2e/smoke.spec.ts e2e/mobile.spec.ts`: 18 smoke scenarios plus 1 phone scenario, all passing at last run. They need internet for terrain and the city ring. The Playwright `webServer` rebuilds `dist` with base `/`.
-- `npx playwright test e2e/perf.spec.ts`: throttled benchmark, written to `test-results/perf.json`. Last steady-state result under 4× CPU throttle: 2D 3 ms, 3D Low 6 ms, 3D High 23 ms per frame.
+- `npx playwright test e2e/perf.spec.ts`: throttled benchmark, written to `test-results/perf.json`. On the current dev machine, SwiftShader with a 4× throttle gives about 1 s per frame for 3D Medium and High, and the same on commits before 2026-11-20. So compare relative changes only, never absolute numbers. Run perf on its own: the smoke suite gets flaky beside throttled perf tests. Before 2026-11-20 the fps readout was inflated on slow frames; it now uses real elapsed time.
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader understates fps, so main-thread ms is the metric to watch.
 
 ## Gotchas
+- Agent caps are 450/1300/3000 for Low/Medium/High (`quality.ts`). The simulation takes about 6 ms per step at 3000 agents, in the worker. `MAX_INSTANCES` is 4000 per agent kind.
+- At night, a cool moonlight and a stronger sky fill keep the map readable. The share of lit windows follows the hour (`lit` uniform): near 10% at 03:00, peaking in the evening. Distant windows blend to an average glow instead of static.
 - Sidewalks are split at junction nodes (shared by 2+ non-footway roads) and trimmed back by the widest meeting street + 3.5 m (`trimLine` in geometry.ts).
 - `SimClient.watch(id)` must ignore repeat calls for the same id, or the inspector loses its info every refresh (it showed 0 km/h).
 - Public Overpass mirrors are slow or flaky. Packs and tiles exist to avoid them, and the builders retry with backoff.

@@ -12,6 +12,8 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [ ] 3D High in dense cities needs a real-GPU check (software GL is too noisy to judge)
 
 ## P1
+- [x] Busier, more realistic streets: 3× agent caps, a higher overnight demand floor. Readable nights: moonlight, windows lit by hour, no window static (2026-11-20)
+- [ ] Calibrate the demand curve and volumes against real counts (free open traffic counts, e.g. city open-data portals) per featured city
 - [x] Sidewalks stop at junctions instead of crossing them; inspector speed no longer stuck at 0 km/h (2026-11-20)
 - [x] Traffic by time of day: "Jump to…" (now, rush hours, night) re-seeds traffic for that hour; Traffic button in the sim bar; congestion-by-hour chart in the dashboard (2026-11-20)
 - [x] City-ring buildings: click to inspect (height, footprint, source); “Load detail here” streams that tile first; editing tools explain they're view-only (2026-11-20)

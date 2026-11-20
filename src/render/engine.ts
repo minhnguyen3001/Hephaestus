@@ -142,7 +142,7 @@ const PALETTES: Record<string, number[]> = {
   pedestrian: [0x34495e, 0xc0392b, 0x2980b9, 0x27ae60, 0x8e44ad, 0xf39c12, 0x7f8c8d, 0xecf0f1, 0x16a085],
   emergency: [0xf4f4f4, 0xf4f4f4, 0xd8342c],
 };
-const MAX_INSTANCES = 1100;
+const MAX_INSTANCES = 4000; // per agent kind: High runs up to 3000 agents × 1.8 projected demand
 /** Chunk size (m): big enough to keep draw calls low, small enough that an edit rebuilds quickly. */
 const CHUNK = 300;
 
@@ -195,7 +195,9 @@ const LAMP_ON = new THREE.Color(0xffd28a);
 const SIDEWALK = new Set(['primary', 'secondary', 'tertiary', 'residential']);
 const SIDEWALK_COLOR = new THREE.Color(0xc9c3b8);
 const SKY_DUSK = new THREE.Color(0xf0a878);
-const SKY_NIGHT = new THREE.Color(0x0b1322);
+const SKY_NIGHT = new THREE.Color(0x1a2740);
+const SUN_DAY = new THREE.Color(0xfff1dc);
+const HEMI_DAY = new THREE.Color(0xdfeeff);
 
 export class Engine implements WorldRenderer {
   readonly renderer: THREE.WebGLRenderer;
@@ -216,6 +218,8 @@ export class Engine implements WorldRenderer {
   private highlight?: THREE.Object3D;
   private roadPreview?: THREE.Line;
   private night = { value: 0 };
+  /** Share of windows lit: follows when people are home and awake, not just darkness. */
+  private lit = { value: 0.5 };
   private buildingMat: THREE.MeshStandardMaterial;
   private flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   private world?: WorldData;
@@ -517,11 +521,12 @@ export class Engine implements WorldRenderer {
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.04 });
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uNight = this.night;
+      shader.uniforms.uLit = this.lit;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute float aWall;\nattribute vec2 aFacade;\nvarying float vWall;\nvarying vec2 vFacade;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWall = aWall;\nvFacade = aFacade;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying float vWall;\nvarying vec2 vFacade;')
+        .replace('#include <common>', '#include <common>\nuniform float uNight;\nuniform float uLit;\nvarying float vWall;\nvarying vec2 vFacade;')
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
@@ -535,7 +540,8 @@ export class Engine implements WorldRenderer {
             vec3 glass = mix(vec3(0.32, 0.44, 0.56), vec3(0.62, 0.74, 0.84), smoothstep(0.0, 140.0, vFacade.y));
             diffuseColor.rgb = mix(mix(diffuseColor.rgb, glass, 0.72), vec3(0.82, 0.85, 0.88), mull * 0.6);
             float r = fract(sin(dot(floor(cell * vec2(0.5, 1.0)) + vColor.rg * 97.0, vec2(12.9898, 78.233))) * 43758.5453);
-            gLit = (1.0 - mull) * step(0.45, r) * 0.8;
+            // far away, single windows alias into static; blend to their average glow instead
+            gLit = mix(uLit * 0.3, (1.0 - mull) * step(1.0 - uLit, r) * 0.8, fade);
           } else if (vWall > 3.5 && vFacade.y < 4.2) {
             // ground-floor shopfront: tall glass bays with thin frames, warm light after dark
             vec2 cell = vec2(vFacade.x / 4.0, 0.0);
@@ -552,11 +558,11 @@ export class Engine implements WorldRenderer {
             float fade = 1.0 - smoothstep(0.2, 0.55, max(fwidth(cell.x), fwidth(cell.y)));
             float win = rawWin * fade;
             float r = fract(sin(dot(floor(cell) + vColor.rg * 97.0, vec2(12.9898, 78.233))) * 43758.5453);
-            gLit = rawWin * step(0.5, r) * mix(0.55, 1.0, fade);
+            gLit = mix(uLit * 0.25, rawWin * step(1.0 - uLit, r), fade);
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.21, 0.28), win * 0.45);
           }`,
         )
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.8, 0.48) * gLit * uNight * 1.3;');
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.8, 0.48) * gLit * uNight * 1.1;');
     };
     return mat;
   }
@@ -1429,7 +1435,7 @@ export class Engine implements WorldRenderer {
     this.updateSky();
     this.renderer.render(this.scene, this.camera);
     this.busy += performance.now() - start;
-    this.trackPerf(dt);
+    this.trackPerf(Math.min(raw, 5)); // real elapsed time: the 0.1 s animation cap made slow frames report inflated fps
   };
 
   private updateAgents() {
@@ -1566,10 +1572,14 @@ export class Engine implements WorldRenderer {
     const t = this.controls.target;
     this.sun.position.set(t.x + Math.cos(az) * Math.cos(el) * r, Math.sin(el) * r, t.z + Math.sin(az) * Math.cos(el) * r);
     this.sun.target.position.set(t.x, 0, t.z);
-    this.sun.intensity = 0.08 + 2.4 * day;
-    this.sun.color.setHex(0xfff1dc).lerp(SKY_DUSK, dusk * 0.6);
-    this.hemi.intensity = 0.25 + 0.75 * day;
+    // after dark a cool moonlight and brighter sky fill keep streets and blocks readable
+    this.sun.intensity = 0.45 * (1 - day) + 2.4 * day;
+    this.sun.color.setHex(0x9fb4e0).lerp(SUN_DAY, day).lerp(SKY_DUSK, dusk * 0.6);
+    this.hemi.intensity = 0.85 + 0.15 * day;
+    this.hemi.color.setHex(0x8fa6d6).lerp(HEMI_DAY, day);
     this.night.value = 1 - day;
+    const g = (mu: number, w: number) => Math.exp(-(((h - mu + 36) % 24 - 12) ** 2) / (2 * w * w));
+    this.lit.value = Math.min(0.6, 0.1 + 0.42 * g(20.5, 2.6) + 0.18 * g(7, 1.2));
     LAMP_MAT.color.setHex(0x55585e).lerp(LAMP_ON, Math.min(1, (1 - day) * 1.4));
     const bg = SKY_NIGHT.clone().lerp(SKY_DAY, day).lerp(SKY_DUSK, dusk * 0.55);
     if (this.weather !== 'clear') bg.lerp(new THREE.Color(this.weather === 'snow' ? 0xdfe5ea : 0x8d97a3), 0.6 * day + 0.2);

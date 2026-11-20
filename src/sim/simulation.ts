@@ -252,7 +252,7 @@ export function demandAt(hour: number, day: DayType = 'weekday'): number {
   const g = (mu: number, w: number) => Math.exp(-((hour - mu) ** 2) / (2 * w * w));
   if (day === 'weekend') return Math.min(1, (hour < 6 ? 0.07 : 0.1) + 0.68 * g(14.5, 3.2) + 0.15 * g(21, 1.5));
   if (day === 'holiday') return Math.min(1, (hour < 7 ? 0.05 : 0.08) + 0.5 * g(15, 3.5) + 0.2 * g(20.5, 1.5));
-  const night = hour < 5 ? 0.06 : 0.14;
+  const night = hour < 5 ? 0.09 : 0.16; // real streets are never empty, even at 03:00
   return Math.min(1, night + 0.86 * Math.max(g(8.2, 1.1), g(17.6, 1.3)) + 0.4 * g(13, 2.4));
 }
 

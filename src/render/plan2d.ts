@@ -466,7 +466,7 @@ export class Plan2D implements WorldRenderer {
     }
     if (night > 0) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = `rgba(11,19,34,${0.45 * Math.min(1, night)})`;
+      ctx.fillStyle = `rgba(11,19,34,${0.22 * Math.min(1, night)})`;
       ctx.fillRect(0, 0, W, H);
     }
     if (this.weather !== 'clear') {
