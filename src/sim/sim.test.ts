@@ -437,6 +437,24 @@ describe('map tiles', () => {
   });
 });
 
+describe('city-ring buildings', () => {
+  it('are view-only: editing tools explain instead of editing', async () => {
+    const { ToolController } = await import('../render/tools');
+    const edits: unknown[] = [];
+    const hints: (string | null)[] = [];
+    const tc = new ToolController({
+      onEdit: (e) => edits.push(e), onHint: (m) => hints.push(m), select: () => undefined, follow: () => undefined,
+      preselect: () => undefined, clearPreview: () => undefined, drawDraft: () => undefined, placeEvent: () => undefined,
+    });
+    tc.set('bulldoze');
+    tc.click({ kind: 'building', id: 'ring:1/2:10:20', p: [0, 0] }, gridFixture());
+    expect(edits).toHaveLength(0);
+    expect(hints.at(-1)).toMatch(/Load detail here/);
+    tc.click({ kind: 'building', id: 'w1', p: [0, 0] }, gridFixture());
+    expect(edits).toHaveLength(1);
+  });
+});
+
 describe('trees', () => {
   it('keeps every mapped tree and plants illustrative trees only inside parks', async () => {
     const { treePoints } = await import('../geo/trees');

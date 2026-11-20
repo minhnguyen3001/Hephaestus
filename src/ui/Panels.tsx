@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Building, BuildingUse } from '../geo/types';
-import { signedArea } from '../geo/util';
+import { centroid, signedArea } from '../geo/util';
 import type { Edit } from '../project/edits';
 import type { AgentInfo, Selection } from '../render/engine';
 import type { RegionProfile } from '../sim/region';
@@ -23,7 +23,7 @@ const KIND_LABEL: Record<string, string> = {
 export const fmt = (n: number) => (Math.abs(n) >= 10000 ? `${(n / 1000).toFixed(1)}k` : Math.round(n).toLocaleString());
 
 export function Inspector({
-  sel, editable, onEdit, onFocus, onFollow, following, onClose,
+  sel, editable, onEdit, onFocus, onFollow, following, onClose, onLoadDetail,
 }: {
   sel: Selection;
   editable: boolean;
@@ -32,11 +32,29 @@ export function Inspector({
   onFollow: (id: number | null) => void;
   following: boolean;
   onClose: () => void;
+  onLoadDetail?: (p: Vec2) => void;
 }) {
   return (
     <aside className="panel inspector" aria-label="Inspector">
       <button className="icon-btn close" onClick={onClose} aria-label="Close inspector">✕</button>
-      {sel.type === 'building' && <BuildingInspector b={sel.building} editable={editable} onEdit={onEdit} onFocus={onFocus} />}
+      {sel.type === 'building' && sel.overview && (
+        <>
+          <p className="eyebrow">Building · overview data</p>
+          <h3>Building</h3>
+          <div className="badges"><span className="badge estimated" title="From OpenFreeMap vector tiles (OpenMapTiles schema)">City-ring data</span></div>
+          <dl>
+            <dt>Height</dt><dd>{Math.round(sel.building.height)} m · ~{Math.max(1, Math.round(sel.building.height / 3.2))} floors</dd>
+            <dt>Footprint</dt><dd>{fmt(Math.abs(signedArea(sel.building.footprint)))} m²</dd>
+            <dt>Source</dt><dd>OpenFreeMap © OpenMapTiles © OpenStreetMap</dd>
+          </dl>
+          <p className="note">This area is shown as lightweight overview data. Load the detailed map here to see its use, simulate it and edit it.</p>
+          <div className="row">
+            <button onClick={onFocus}>Orbit 360°</button>
+            {onLoadDetail && <button className="primary" onClick={() => onLoadDetail(centroid(sel.building.footprint))}>Load detail here</button>}
+          </div>
+        </>
+      )}
+      {sel.type === 'building' && !sel.overview && <BuildingInspector b={sel.building} editable={editable} onEdit={onEdit} onFocus={onFocus} />}
       {sel.type === 'road' && (
         <>
           <p className="eyebrow">{sel.road.origin === 'proposed' ? 'Proposed road' : 'Road · OpenStreetMap'}</p>

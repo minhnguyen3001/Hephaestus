@@ -27,7 +27,7 @@ export type CameraMode = 'city' | 'aerial' | 'neighborhood' | 'street' | 'inspec
 
 
 export type Selection =
-  | { type: 'building'; building: Building }
+  | { type: 'building'; building: Building; overview?: boolean } // overview = city-ring data, view-only
   | { type: 'road'; road: Road }
   | { type: 'agent'; agent: AgentInfo };
 
@@ -465,10 +465,11 @@ export class Engine implements WorldRenderer {
     const s = this.selected;
     if (!s || !this.world) return;
     if (s.type === 'building') {
-      const b = this.world.buildings.find((x) => x.id === s.id);
-      if (!b) return;
+      const found = this.findBuilding(s.id);
+      if (!found) return;
+      const { b, base } = found;
       const size = Math.max(...b.footprint.map((p) => dist(p, centroid(b.footprint))));
-      this.flyTo(v3(centroid(b.footprint), this.base(b) + b.height * 0.45), Math.max(40, size * 2.6, b.height * 1.8), 1.15);
+      this.flyTo(v3(centroid(b.footprint), base + b.height * 0.45), Math.max(40, size * 2.6, b.height * 1.8), 1.15);
     } else if (s.type === 'road') {
       const r = this.world.roads.find((x) => x.id === s.id);
       if (r) {
@@ -1199,6 +1200,15 @@ export class Engine implements WorldRenderer {
   // ---------- city ring (context tiles) ----------
   private ctxTiles = new Map<string, { sig: string; group: THREE.Group }>();
   private ctxBuildingMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  /** City-ring buildings by pick id, so they can be inspected (read-only). */
+  private ringInfo = new Map<string, { b: Building; base: number }>();
+  /** A building by id: detailed data first, then the city ring. */
+  private findBuilding(id: string | number): { b: Building; base: number; overview: boolean } | null {
+    const b = this.world?.buildings.find((x) => x.id === id);
+    if (b) return { b, base: this.base(b), overview: false };
+    const r = this.ringInfo.get(String(id));
+    return r ? { ...r, overview: true } : null;
+  }
   private ctxMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
 
   setContext(tiles: ContextTile[], detail: DetailZone) {
@@ -1214,14 +1224,14 @@ export class Engine implements WorldRenderer {
     const terrainSig = this.world?.terrain ? 't' : 'f';
     for (const t of tiles) {
       const sig = overlapSig(detail, t.center) + terrainSig;
-      const cur = this.ctxTiles.get(t.key);
-      if (cur?.sig === sig || this.work.get(`c:${t.key}#0`)?.run.name === sig) continue;
-      // dense tiles hold tens of thousands of buildings: build in four quarters so no frame stalls
+      // dense tiles hold tens of thousands of buildings: build in four quarters so no frame stalls.
+      // A quarter is current if it is built or queued with this signature; only stale quarters are (re)queued.
       const parts = splitTile(t);
-      parts.forEach((part, qi) => {
+      parts.forEach((part) => {
+        if (this.ctxTiles.get(part.key)?.sig === sig || this.work.get(`c:${part.key}`)?.run.name === sig) return;
         const run = () => this.buildContextTile(part, detail, sig, lift);
         Object.defineProperty(run, 'name', { value: sig });
-        this.work.set(`c:${t.key}#${qi}`, { at: part.center, run });
+        this.work.set(`c:${part.key}`, { at: part.center, run });
       });
     }
   }
@@ -1236,20 +1246,26 @@ export class Engine implements WorldRenderer {
       const g = new THREE.Group();
       const outside = (p: Vec2) => !inDetail(detail, p);
       // buildings: same facade shader as detailed ones, neutral palette, no shadows (cheap)
-      const bgeoms: THREE.BufferGeometry[] = [];
+      const items: { id: string; geom: THREE.BufferGeometry }[] = [];
+      for (const id of this.ringInfo.keys()) if (id.startsWith(`ring:${t.key}:`)) this.ringInfo.delete(id);
       const ringR = PRESETS[this.quality].ring;
       for (const b of t.buildings) {
         const c = centroid(b.ring);
         if (!outside(c) || c[0] * c[0] + c[1] * c[1] > ringR * ringR) continue;
         if (b.height < 6 && Math.abs(signedArea(b.ring)) < 60) continue; // sheds and garages add triangles, not information
-        const fake: Building = { id: `${t.key}:${c[0] | 0}:${c[1] | 0}`, footprint: b.ring, height: b.height, heightSource: 'osm-height', use: b.height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real' };
+        const fake: Building = { id: `ring:${t.key}:${c[0] | 0}:${c[1] | 0}`, footprint: b.ring, height: b.height, heightSource: 'osm-height', use: b.height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real', name: 'Building (overview data)' };
         let base = Infinity;
         for (const p of b.ring) base = Math.min(base, this.hp(p));
-        bgeoms.push(buildingGeometry(fake, buildingColor(fake, { highlightEstimated: false }), base));
+        this.ringInfo.set(fake.id, { b: fake, base });
+        items.push({ id: fake.id, geom: buildingGeometry(fake, buildingColor(fake, { highlightEstimated: false }), base) });
       }
       // High uses the lit-window facade shader; Low/Medium a flat material (far cheaper per pixel)
-      if (bgeoms.length) g.add(new THREE.Mesh(mergeGeometries(bgeoms)!, this.quality === 'high' ? this.buildingMat : this.ctxBuildingMat));
-      bgeoms.forEach((x) => x.dispose());
+      if (items.length) {
+        const pick = new PickMesh(items, this.quality === 'high' ? this.buildingMat : this.ctxBuildingMat);
+        pick.mesh.userData.pick = 'building';
+        pick.mesh.userData.chunk = pick;
+        g.add(pick.mesh);
+      }
       const flat: THREE.BufferGeometry[] = [];
       for (const w of t.water) {
         if (!outside(centroid(w))) continue;
@@ -1330,14 +1346,15 @@ export class Engine implements WorldRenderer {
     const w = this.world;
     if (!s || !w) return this.cb.onSelect(null);
     if (s.type === 'building') {
-      const b = w.buildings.find((x) => x.id === s.id);
-      if (!b) return this.select(null);
-      const g = buildingGeometry({ ...b, height: b.height + 0.05 }, new THREE.Color(), this.base(b));
+      const found = this.findBuilding(s.id);
+      if (!found) return this.select(null);
+      const { b, base, overview } = found;
+      const g = buildingGeometry({ ...b, height: b.height + 0.05 }, new THREE.Color(), base);
       this.highlight = new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), new THREE.LineBasicMaterial({ color: 0x00e5ff, depthTest: false, transparent: true }));
       g.dispose();
       this.highlight.renderOrder = 10;
       this.scene.add(this.highlight);
-      this.cb.onSelect({ type: 'building', building: b });
+      this.cb.onSelect({ type: 'building', building: b, overview });
     } else if (s.type === 'road') {
       const r = w.roads.find((x) => x.id === s.id);
       if (!r) return this.select(null);
@@ -1649,6 +1666,14 @@ export class Engine implements WorldRenderer {
           if (!g.boundingSphere) g.computeBoundingSphere();
           const bs = g.boundingSphere!;
           if (ray.distanceSqToPoint(bs.center) <= bs.radius * bs.radius && ray.origin.distanceTo(bs.center) - bs.radius <= groundT) targets.push(c.pick.mesh);
+        }
+      }
+      for (const c of this.ctxTiles.values()) {
+        for (const m of c.group.children as THREE.Mesh[]) {
+          if (!m.userData.chunk || !m.visible) continue;
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          const bs = m.geometry.boundingSphere!;
+          if (ray.distanceSqToPoint(bs.center) <= bs.radius * bs.radius && ray.origin.distanceTo(bs.center) - bs.radius <= groundT) targets.push(m);
         }
       }
     }

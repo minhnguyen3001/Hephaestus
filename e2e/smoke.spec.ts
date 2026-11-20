@@ -345,10 +345,37 @@ test('city ring shows ~10 km of the city', async ({ page }) => {
   await expect(page.locator('.attribution')).toContainText('OpenFreeMap', { timeout: 60_000 });
   await page.getByRole('button', { name: 'Hide dashboard' }).click();
   await page.getByRole('button', { name: 'City', exact: true }).click();
-  await page.waitForTimeout(15000);
+  // the scene must settle (regression: re-queued ring quarters kept rebuilding forever)
+  await expect(page.locator('.attribution')).not.toContainText('building scene', { timeout: 120_000 });
+  const tris = Number(/([\d.]+)M triangles/.exec((await page.locator('.attribution .perf').getAttribute('title')) ?? '')?.[1] ?? 0);
+  expect(tris).toBeGreaterThan(0.3); // the whole ring is drawn, not just the detail centre
   await page.screenshot({ path: 'test-results/26-city-ring.png' });
   await page.getByRole('button', { name: '2D plan' }).click();
   await page.getByRole('button', { name: 'City', exact: true }).click();
   await page.waitForTimeout(3000);
   await page.screenshot({ path: 'test-results/27-city-ring-2d.png' });
+});
+
+test('city-ring buildings can be inspected and their detail loaded on request', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.quality', 'medium'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Chicago Loop/ }).click();
+  await expect(page.locator('.attribution')).toContainText('OpenFreeMap', { timeout: 60_000 });
+  await expect(page.locator('.attribution')).not.toContainText('building scene', { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'City', exact: true }).click();
+  await page.waitForTimeout(3000);
+  await expect(page.locator('.attribution')).not.toContainText('building scene', { timeout: 120_000 });
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  let found = false;
+  // probe points on the outer part of the city (west/south-west, away from the lake)
+  for (const [fx, fy] of [[0.25, 0.55], [0.3, 0.65], [0.2, 0.45], [0.35, 0.75], [0.28, 0.6], [0.22, 0.7], [0.32, 0.5]]) {
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    if (await page.locator('.inspector').getByText('overview data').first().isVisible().catch(() => false)) { found = true; break; }
+  }
+  await page.screenshot({ path: 'test-results/28-ring-inspect.png' });
+  expect(found).toBe(true);
+  await page.getByRole('button', { name: 'Load detail here' }).click();
+  await expect(page.locator('.hint')).toContainText(/Loading the detailed map here|budget/);
 });

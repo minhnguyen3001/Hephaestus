@@ -119,6 +119,9 @@ export class ToolController {
 
   click(hit: Hit, world: WorldData | undefined) {
     const h = this.host;
+    if (this.tool !== 'select' && typeof hit.id === 'string' && hit.id.startsWith('ring:')) {
+      return h.onHint('That area shows overview data. Select a building there and choose “Load detail here” to edit it.');
+    }
     if (this.tool === 'select') {
       if (hit.kind === 'ground') return h.select(null);
       h.select({ type: hit.kind, id: hit.id });

@@ -70,7 +70,8 @@ export class TileStream {
     for (const [i, j] of cands) {
       if (this.loaded.size + this.pending.size >= this.budget) break;
       this.pending.add(`${i},${j}`);
-      this.queue.push([i, j]);
+      if (reach === 0) this.queue.unshift([i, j]); // an explicit request ("Load detail here") jumps the queue
+      else this.queue.push([i, j]);
     }
     this.pump();
   }

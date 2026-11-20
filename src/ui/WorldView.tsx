@@ -100,6 +100,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
 
   const host = useRef<HTMLDivElement>(null);
   const pendingView = useRef(true);
+  const streamRef = useRef<TileStream | null>(null);
   const restoreView = (r: WorldRenderer) => {
     if (!pendingView.current) return;
     pendingView.current = false;
@@ -310,12 +311,12 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     if (!baseReady) return;
     const center = { lat: project.place.lat, lon: project.place.lon };
     const incoming: WorldData[] = [];
-    const stream = new TileStream(
+    const stream = (streamRef.current = new TileStream(
       center,
       PRESETS[resolveQuality(quality)].tiles,
       (w) => incoming.push(w),
       (loaded, pending, budget) => setTiles({ loaded, pending, budget }),
-    );
+    ));
     stream.seed(['0,0']); // the initial load already covers the centre tile
     stream.want(0, 0, 1);
     // Batch tile arrivals so the scene and simulation update every few seconds, not per tile.
@@ -336,6 +337,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       if (c) stream.want(c[0], c[1], 1);
     }, 1500);
     return () => {
+      streamRef.current = null;
       stream.dispose();
       clearInterval(flush);
       clearInterval(look);
@@ -379,6 +381,15 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   useEffect(() => {
     engine.current?.setContext(ctxTiles, { radius: project.radius, tiles: detailKeys });
   }, [ctxTiles, detailKeys, terrainRef, project.radius, quality, mode]);
+
+  const loadDetail = (p: Vec2) => {
+    const s = streamRef.current;
+    if (!s) return;
+    if (s.atBudget) return setHint('The detailed-map budget for this graphics setting is used up. Raise Graphics quality to load more.');
+    s.want(p[0], p[1], 0);
+    setHint('Loading the detailed map here. Buildings become editable when it arrives (usually a few seconds; longer outside featured cities).');
+    engine.current?.select(null);
+  };
 
   // Terrain follows the loaded area: re-fetch (cached tiles, finer grid) when the city grows.
   const radius = base?.radius;
@@ -571,6 +582,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
             mark('orbited');
             engine.current?.focusSelected();
           }}
+          onLoadDetail={loadDetail}
           following={selection.type === 'agent' && following === selection.agent.id}
           onFollow={(id) => {
             setFollowing(id);

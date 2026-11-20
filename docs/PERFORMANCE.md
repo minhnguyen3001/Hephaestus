@@ -47,11 +47,11 @@ Measured with 4× CPU throttle and software GL, at steady state. GPU load comes 
 
 | Quality | Main-thread ms/frame | District view | City view (whole ring) |
 | --- | --- | --- | --- |
-| Low (3 km ring) | 13.7 | 65 calls · 0.28M tris | 91 calls · 0.36M tris |
-| Medium (4 km ring) | 20.7 | 88 calls · 0.47M tris | 127 calls · 0.53M tris |
+| Low (3 km ring) | 13.1 | 129 calls · 0.39M tris | 175 calls · 0.55M tris |
+| Medium (4 km ring) | 19.0 | 115 calls · 0.51M tris | 88 calls · 0.53M tris |
 | High (5 km ring) | noisy (software GL with shadows) | 61 calls · 0.73M tris | 48 calls · 0.76M tris |
 
-Verdict: Low and Medium stay well inside an integrated GPU's budget (roughly 1–2M triangles at 30 fps) even with the whole ring on screen. High needs real-GPU confirmation; Auto only picks it on 8+ cores and 8+ GB.
+These are the numbers after fixing a bug where ring quarters kept rebuilding and never finished. Verdict: Low and Medium stay well inside an integrated GPU's budget (roughly 1–2M triangles at 30 fps) even with the whole ring on screen. High needs real-GPU confirmation; Auto only picks it on 8+ cores and 8+ GB.
 
 Run it yourself: `PERF_CITY=Shibuya npx playwright test e2e/perf.spec.ts -g 3d`.
 
