@@ -1,6 +1,6 @@
 # HANDOFF: read this first
 
-Last updated: 2026-11-17, at commit `87d01ce` on `main`, pushed and deployed.
+Last updated: 2026-11-20, at commit `0515d7e` on `main`, pushed and deployed.
 
 **Ptah** is a browser-based 3D city-building and urban-planning simulator built on real-world geography.
 - Live: https://minhnguyen3001.github.io/Ptah/
@@ -10,7 +10,7 @@ Last updated: 2026-11-17, at commit `87d01ce` on `main`, pushed and deployed.
 ## New-session procedure
 1. Read this file, then `TODO.md`, then `README.md`.
 2. Run `git status` and `git log --oneline -15`. Check this file still matches the repo.
-3. Run `npm install && npm test && npm run build`. Expect 44 unit tests passing.
+3. Run `npm install && npm test && npm run build`. Expect 45 unit tests passing.
 4. Pick the top unchecked item in `TODO.md`. Don't redesign the architecture; the reasons behind it are in `docs/DECISIONS.md`.
 
 ## Owner rules (standing)
@@ -71,19 +71,22 @@ How the pieces connect: React owns project, history and view state. It calls `re
 - Check the Pages build locally with `npm run build:pages && npx playwright test -c playwright.pages.config.ts`.
 
 ## Testing
-- `npm test`: 44 unit tests (Vitest), all passing.
-- `npx playwright test e2e/smoke.spec.ts e2e/mobile.spec.ts`: 17 smoke scenarios plus 1 phone scenario, all passing at last run. They need internet for terrain and the city ring. The Playwright `webServer` rebuilds `dist` with base `/`.
+- `npm test`: 45 unit tests (Vitest), all passing.
+- `npx playwright test e2e/smoke.spec.ts e2e/mobile.spec.ts`: 18 smoke scenarios plus 1 phone scenario, all passing at last run. They need internet for terrain and the city ring. The Playwright `webServer` rebuilds `dist` with base `/`.
 - `npx playwright test e2e/perf.spec.ts`: throttled benchmark, written to `test-results/perf.json`. Last steady-state result under 4× CPU throttle: 2D 3 ms, 3D Low 6 ms, 3D High 23 ms per frame.
 - Playwright 1.60 matches the cached chromium-1223. Headless SwiftShader understates fps, so main-thread ms is the metric to watch.
 
 ## Gotchas
 - Public Overpass mirrors are slow or flaky. Packs and tiles exist to avoid them, and the builders retry with backoff.
 - Don't send a browser-like User-Agent from scripts. Use the honest UA strings already in the scripts.
+- City-ring tiles are built in quarters keyed `tile#0..3`. Up-to-date checks must use the quarter key (a bare-key check caused an endless rebuild loop, fixed 2026-11-20).
+- The frame-rate tooltip in the status bar shows draw calls and triangles, and the perf benchmark records them (`PERF_CITY=… npx playwright test e2e/perf.spec.ts`).
 - Any change to the facade shader (`makeBuildingMaterial`) affects detail buildings and the High-quality city ring alike.
 - `public/` stays under GitHub Pages' 1 GB limit. Check its size before adding more tiles.
 
 ## Next actions
 See `TODO.md`. The top items:
-1. Real-device QA (needs the owner), especially dense cities (Tokyo) on Medium and High.
-2. Click-to-inspect for city-ring buildings, which are view-only today, and prioritising detail tiles under the cursor.
-3. Pre-built reach-2 tiles for featured cities, if repo and Pages size allow.
+1. Real-device QA (needs the owner); 3D High in dense cities on a real GPU.
+2. Pre-built reach-2 detail tiles for featured cities, if repo and Pages size allow (`public/` is 86 MB today).
+3. Transit: headway editing and route colours from OSM.
+4. Time-slice the React side of big tile merges; make ring buildings pickable in the 2D view.
