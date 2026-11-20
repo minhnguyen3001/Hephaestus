@@ -42,6 +42,19 @@ This was measured after streaming finished, with 4× CPU throttling, software GL
 
 Large loads are time-sliced: chunk and city-ring builds run at most 6–10 ms per frame, nearest the camera first, and the status bar shows "building scene…". Edits that touch one to three chunks apply immediately.
 
+## Dense city check: Shibuya, Tokyo (2026-11-20)
+Measured with 4× CPU throttle and software GL, at steady state. GPU load comes from the frame-rate tooltip (draw calls and triangles).
+
+| Quality | Main-thread ms/frame | District view | City view (whole ring) |
+| --- | --- | --- | --- |
+| Low (3 km ring) | 13.7 | 65 calls · 0.28M tris | 91 calls · 0.36M tris |
+| Medium (4 km ring) | 20.7 | 88 calls · 0.47M tris | 127 calls · 0.53M tris |
+| High (5 km ring) | noisy (software GL with shadows) | 61 calls · 0.73M tris | 48 calls · 0.76M tris |
+
+Verdict: Low and Medium stay well inside an integrated GPU's budget (roughly 1–2M triangles at 30 fps) even with the whole ring on screen. High needs real-GPU confirmation; Auto only picks it on 8+ cores and 8+ GB.
+
+Run it yourself: `PERF_CITY=Shibuya npx playwright test e2e/perf.spec.ts -g 3d`.
+
 ## Techniques in place
 - Buildings, roads, areas and rails merged into a few meshes; agents, trees, signals and pillars instanced.
 - Simulation in a Web Worker, sending compact Float32Array frames.

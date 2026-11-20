@@ -8,7 +8,8 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [ ] Real-device QA feedback: an old Windows laptop with integrated GPU, an iPad, an Android phone, Safari. Ask for city, graphics setting and the slow action.
 
 ## P0
-- [ ] Verify the 10 km city ring stays smooth in dense cities (Tokyo, Hong Kong) on Medium. If not, lower the ring radius or building budget per tile for those quality levels.
+- [x] Dense-city check (Shibuya): Low and Medium within GPU budget at City view (0.36M / 0.53M triangles); fixed zoom-out culling that hid most of the city (2026-11-20)
+- [ ] 3D High in dense cities needs a real-GPU check (software GL is too noisy to judge)
 
 ## P1
 - [ ] City-ring buildings: click to inspect (height, footprint, data source) and prioritise loading the detail tile under the cursor

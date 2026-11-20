@@ -651,7 +651,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {base && <span className="hide-sm">{fmt(base.buildings.length)} buildings · {originalMetrics ? Math.round(originalMetrics.estimatedHeights * 100) : 0}% heights estimated · </span>}
         {tiles && <span className="hide-sm">map {tiles.loaded}/{tiles.budget} km²{tiles.pending ? ` · loading ${tiles.pending}…` : ''} · </span>}
         {perf && perf.pending > 0 && <span className="hide-sm">building scene… · </span>}
-        {perf && <span className="hide-sm">{Math.round(perf.fps)} fps · {perf.frameMs.toFixed(1)} ms · {perf.quality} · </span>}
+        {perf && <span className="hide-sm perf" title={`${perf.drawCalls} draw calls · ${(perf.triangles / 1e6).toFixed(2)}M triangles`}>{Math.round(perf.fps)} fps · {perf.frameMs.toFixed(1)} ms · {perf.quality} · </span>}
         Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors
         {ctxTiles.length > 0 && <> · <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a></>}
         {base?.terrain && <> · Terrain: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noreferrer">AWS Terrain Tiles</a></>}

@@ -1281,7 +1281,9 @@ export class Engine implements WorldRenderer {
     if (this.cullT < 0.4) return;
     this.cullT = 0;
     // the detailed zone is small, so it stays visible as far as the city ring (no hole when zoomed out)
-    const farCtx = { low: 4500, medium: 7000, high: 11000 }[this.quality];
+    // Visible range grows with zoom: when you pull back to see the city, you see all of it.
+    const zoom = this.camera.position.distanceTo(this.controls.target) + PRESETS[this.quality].ring;
+    const farCtx = Math.max({ low: 4500, medium: 7000, high: 11000 }[this.quality], zoom);
     const far = farCtx;
     const nearDetail = { low: 500, medium: 900, high: 1400 }[this.quality];
     const cam = this.camera.position;
