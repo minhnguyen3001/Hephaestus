@@ -1,6 +1,6 @@
 # Ptah: Real-World City Simulator
 
-[![status](https://img.shields.io/badge/status-live%20demo-d4a017)](https://minhnguyen3001.github.io/Ptah/)
+![Status](https://img.shields.io/badge/status-under%20development-yellow)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![three.js](https://img.shields.io/badge/three.js-WebGL2-000000?logo=threedotjs&logoColor=white)](https://threejs.org/)
