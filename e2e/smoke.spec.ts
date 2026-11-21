@@ -160,6 +160,12 @@ test('draw a metro line and see riders', async ({ page }) => {
   for (const [fx, fy] of [[0.3, 0.35], [0.45, 0.5], [0.55, 0.55], [0.7, 0.68]]) await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
   await page.getByRole('button', { name: 'Finish line' }).click();
   await expect(page.locator('.lines')).toContainText('Metro A');
+  // run it more often: more trains on the line
+  const metroRow = page.locator('.lines li').filter({ hasText: 'Metro A' });
+  const count = async () => Number((await metroRow.locator('small').first().innerText()).match(/(\d+) vehicle/)?.[1] ?? 0);
+  const before = await count();
+  await page.getByLabel('How often Metro A runs').selectOption({ label: 'every 2 min' });
+  await expect.poll(count, { timeout: 20_000 }).toBeGreaterThan(before);
   await page.getByRole('button', { name: '20×' }).click();
   await page.waitForTimeout(8000);
   await page.screenshot({ path: 'test-results/13-metro-2d.png' });
@@ -384,4 +390,22 @@ test('city-ring buildings can be inspected and their detail loaded on request', 
   expect(found).toBe(true);
   await page.getByRole('button', { name: 'Load detail here' }).click();
   await expect(page.locator('.hint')).toContainText(/Loading the detailed map here|budget/);
+});
+
+test('city-ring buildings can be inspected in the 2D plan', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Chicago Loop/ }).click();
+  await expect(page.locator('.attribution')).toContainText('OpenFreeMap', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'City', exact: true }).click();
+  await page.waitForTimeout(4000);
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  let found = false;
+  for (let fx = 0.12; fx < 0.45 && !found; fx += 0.03)
+    for (const fy of [0.45, 0.55, 0.65]) {
+      await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+      if (await page.locator('.inspector').getByText('overview data').first().isVisible().catch(() => false)) { found = true; break; }
+    }
+  expect(found).toBe(true);
 });

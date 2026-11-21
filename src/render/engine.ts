@@ -91,6 +91,11 @@ function splitTile(t: ContextTile): ContextTile[] {
   return parts;
 }
 
+/** A view-only Building for a city-ring footprint (ids start with `ring:`; editing tools refuse them). */
+export function ringBuilding(tileKey: string, ring: Vec2[], height: number, c = centroid(ring)): Building {
+  return { id: `ring:${tileKey}:${c[0] | 0}:${c[1] | 0}`, footprint: ring, height, heightSource: 'osm-height', use: height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real', name: 'Building (overview data)' };
+}
+
 export function inDetail(z: DetailZone, p: Vec2): boolean {
   if (p[0] * p[0] + p[1] * p[1] < z.radius * z.radius) return true;
   return z.tiles.includes(`${Math.round(p[0] / TILE)},${Math.round(p[1] / TILE)}`);
@@ -1312,7 +1317,7 @@ export class Engine implements WorldRenderer {
         const c = centroid(b.ring);
         if (!outside(c) || c[0] * c[0] + c[1] * c[1] > ringR * ringR) continue;
         if (b.height < 6 && Math.abs(signedArea(b.ring)) < 60) continue; // sheds and garages add triangles, not information
-        const fake: Building = { id: `ring:${t.key}:${c[0] | 0}:${c[1] | 0}`, footprint: b.ring, height: b.height, heightSource: 'osm-height', use: b.height > 40 ? 'office' : 'unknown', useSource: 'osm', origin: 'real', name: 'Building (overview data)' };
+        const fake = ringBuilding(t.key, b.ring, b.height, c);
         let base = Infinity;
         for (const p of b.ring) base = Math.min(base, this.hp(p));
         this.ringInfo.set(fake.id, { b: fake, base });

@@ -19,9 +19,10 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [x] Sidewalks stop at junctions instead of crossing them; inspector speed no longer stuck at 0 km/h (2026-11-20)
 - [x] Traffic by time of day: "Jump to…" (now, rush hours, night) re-seeds traffic for that hour; Traffic button in the sim bar; congestion-by-hour chart in the dashboard (2026-11-20)
 - [x] City-ring buildings: click to inspect (height, footprint, source); “Load detail here” streams that tile first; editing tools explain they're view-only (2026-11-20)
-- [ ] 2D plan view: ring buildings are not pickable yet (3D only)
+- [x] 2D plan view: ring buildings are clickable and inspectable (2026-11-20)
 - [ ] Pre-build reach-2 detail tiles (5×5 km) for featured cities if `public/` stays well under 1 GB (currently 86 MB)
-- [ ] Transit: line headway editing; route colours from OSM relations; free GTFS feeds where available
+- [x] Transit: headway per drawn line ("every N min" in the dashboard; `setLine` edit); mapped lines get distinct illustrative colours (2026-11-20)
+- [ ] Transit: official route colours from OSM route relations (needs relations in packs); free GTFS feeds where available
 - [ ] Time-slice the React side of large tile merges (`applyEdits`, `cityMetrics`) for very dense areas
 
 ## P2
@@ -30,7 +31,7 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [ ] Network-based walk isochrones (access metrics currently use straight-line distance)
 - [ ] Scheduled GitHub Action (free on a public repo) to refresh packs and tiles monthly
 - [ ] Lane changes and intersection conflict resolution between turning vehicles
-- [ ] Metro trains keep headway (they can overlap at stations on short lines)
+- [x] Metro trains keep 250 m block spacing and don't enter an occupied station (2026-11-20)
 
 ## P3
 - [ ] Accounts, cloud save and real-time collaboration (needs a free-tier backend and owner approval)

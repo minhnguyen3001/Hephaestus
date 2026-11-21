@@ -98,6 +98,8 @@ export interface TransitLineSpec {
   mode: 'bus' | 'metro';
   stops: Vec2[];
   color: number;
+  /** Minutes between vehicles in each direction; unset = automatic (one vehicle per ~900 m). */
+  headwayMin?: number;
 }
 
 export interface WorldData {

@@ -6,7 +6,7 @@ import { SimClient } from '../sim/client';
 import { roadWidth } from '../sim/graph';
 import type { RegionProfile } from '../sim/region';
 import { signalPhase, type CityEvent, type SimParams, type Weather } from '../sim/simulation';
-import { inDetail, trafficColor, type CameraMode, type DetailZone, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
+import { inDetail, ringBuilding, trafficColor, type CameraMode, type DetailZone, type EngineCallbacks, type Layers, type WorldRenderer } from './engine';
 import type { ContextTile } from '../geo/vectortiles';
 import { CONTEXT_RADIUS } from '../geo/vectortiles';
 import { AGENT_COLORS, AREA_COLORS, ESTIMATED_TINT, hex, PROPOSED_COLOR, ROAD_COLORS, USE_COLORS, ZONE_COLORS } from './palette';
@@ -318,7 +318,9 @@ export class Plan2D implements WorldRenderer {
     if (!s || !w) return this.cb.onSelect(null);
     if (s.type === 'building') {
       const b = w.buildings.find((x) => x.id === s.id);
-      return b ? this.cb.onSelect({ type: 'building', building: b }) : this.select(null);
+      if (b) return this.cb.onSelect({ type: 'building', building: b });
+      const ring = this.ringSel?.id === s.id ? this.ringSel : null;
+      return ring ? this.cb.onSelect({ type: 'building', building: ring, overview: true }) : this.select(null);
     }
     if (s.type === 'road') {
       const r = w.roads.find((x) => x.id === s.id);
@@ -382,13 +384,23 @@ export class Plan2D implements WorldRenderer {
   // City ring in 2D: one Path2D set per vector tile, so off-screen tiles are skipped entirely.
   private ctx2d: { c: Vec2; buildings: Path2D; roads: Path2D; water: Path2D; green: Path2D }[] = [];
   private ctxSig = '';
+  /** Ring footprints for click-to-inspect (a linear bbox scan runs only on click). */
+  private ringPick: { key: string; ring: Vec2[]; height: number; bb: [number, number, number, number] }[] = [];
+  private ringSel: Building | null = null;
 
   setContext(tiles: ContextTile[], detail: DetailZone) {
     const sig = `${tiles.length}|${detail.radius}|${detail.tiles.length}`;
     if (sig === this.ctxSig) return;
     this.ctxSig = sig;
     const outside = (p: Vec2) => !inDetail(detail, p);
+    this.ringPick = [];
     this.ctx2d = tiles.map((t) => {
+      for (const b of t.buildings) {
+        if (!outside(b.ring[0])) continue;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const [x, y] of b.ring) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+        this.ringPick.push({ key: t.key, ring: b.ring, height: b.height, bb: [x0, y0, x1, y1] });
+      }
       const out = { c: t.center, buildings: new Path2D(), roads: new Path2D(), water: new Path2D(), green: new Path2D() };
       for (const b of t.buildings) if (outside(b.ring[0])) out.buildings.addPath(this.polyPath(b.ring));
       for (const w of t.water) if (outside(w[0])) out.water.addPath(this.polyPath(w));
@@ -595,7 +607,7 @@ export class Plan2D implements WorldRenderer {
     ctx.strokeStyle = '#00e5ff';
     ctx.lineWidth = 3 * px;
     if (s?.type === 'building') {
-      const b = w.buildings.find((x) => x.id === s.id);
+      const b = w.buildings.find((x) => x.id === s.id) ?? (this.ringSel?.id === s.id ? this.ringSel : undefined);
       if (b) ctx.stroke(this.polyPath(b.footprint));
     } else if (s?.type === 'road') {
       const r = w.roads.find((x) => x.id === s.id);
@@ -676,6 +688,12 @@ export class Plan2D implements WorldRenderer {
         }
       }
       if (road && rd < Math.max(roadWidth(road) / 2, tol)) return { kind: 'road', id: road.id, p };
+    }
+    for (const r of this.ringPick) {
+      const bb = r.bb;
+      if (p[0] < bb[0] || p[0] > bb[2] || p[1] < bb[1] || p[1] > bb[3] || !pointInPolygon(p, r.ring)) continue;
+      this.ringSel = ringBuilding(r.key, r.ring, r.height);
+      return { kind: 'building', id: this.ringSel.id, p };
     }
     return { kind: 'ground', id: '', p };
   }

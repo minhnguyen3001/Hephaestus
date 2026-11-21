@@ -17,7 +17,8 @@ export type Edit =
   | { kind: 'setRoad'; id: string; patch: RoadPatch }
   | { kind: 'addNote'; note: Note }
   | { kind: 'removeNote'; id: string }
-  | { kind: 'removeLine'; id: string };
+  | { kind: 'removeLine'; id: string }
+  | { kind: 'setLine'; id: string; patch: Partial<Pick<TransitLineSpec, 'headwayMin' | 'name' | 'color'>> };
 
 export type RoadPatch = Partial<Pick<Road, 'lanes' | 'oneway' | 'maxspeedKmh' | 'kind' | 'bikeLane'>>;
 
@@ -77,6 +78,11 @@ export function applyEdits(base: WorldData, edits: Edit[]): WorldData {
       case 'removeLine':
         lines.delete(e.id);
         break;
+      case 'setLine': {
+        const l = lines.get(e.id);
+        if (l) lines.set(e.id, { ...l, ...e.patch });
+        break;
+      }
     }
   }
   return { ...base, buildings: [...buildings.values()], roads: [...roads.values()], transitLines: [...lines.values()], areas, notes: [...notes.values()] };
@@ -109,6 +115,7 @@ export function describeEdit(e: Edit): string {
     case 'addNote': return 'Note';
     case 'removeNote': return 'Remove note';
     case 'removeLine': return 'Remove transit line';
+    case 'setLine': return e.patch.headwayMin ? `Line every ${e.patch.headwayMin} min` : 'Edit transit line';
   }
 }
 

@@ -264,7 +264,7 @@ function HourlyCongestion({ hourly, now }: { hourly: (number | null)[]; now: num
   );
 }
 
-export function Dashboard({ hourly, stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { hourly?: (number | null)[]; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
+export function Dashboard({ headways, onHeadway, hourly, stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { headways?: Record<string, number | undefined>; onHeadway?: (id: string, min: number | undefined) => void; hourly?: (number | null)[]; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -414,6 +414,13 @@ export function Dashboard({ hourly, stats, proposed, original, region, editCount
                 <i style={{ background: `#${l.color.toString(16).padStart(6, '0')}` }} />
                 <span className="lname">{l.name}<small>{l.mode === 'metro' ? 'metro' : 'bus'} · {l.vehicles} vehicle{l.vehicles === 1 ? '' : 's'}</small></span>
                 <span title="Boardings so far / riding now / waiting">{fmt(l.boardings)} <small>boarded</small><br />{l.onboard} <small>on board</small> · {l.waiting} <small>waiting</small></span>
+                {!l.generated && onHeadway && (
+                  <select className="headway" value={headways?.[l.id] ?? ''} aria-label={`How often ${l.name} runs`} title="How often a vehicle leaves each end. More frequent service attracts more riders and needs more vehicles."
+                    onChange={(e) => onHeadway(l.id, e.target.value ? +e.target.value : undefined)}>
+                    <option value="">Auto</option>
+                    {[2, 3, 5, 10, 15, 20, 30].map((m) => <option key={m} value={m}>every {m} min</option>)}
+                  </select>
+                )}
                 {!l.generated && onRemoveLine && <button className="icon-btn" aria-label={`Remove ${l.name}`} onClick={() => onRemoveLine(l.id)}>✕</button>}
               </li>
             ))}

@@ -613,7 +613,9 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           onRemoveEvent={(id) => setEvents((es) => es.filter((e) => e.id !== id))}
           onRemoveNote={editable ? (id) => edit({ kind: 'removeNote', id }) : undefined}
           onLook={(p) => engine.current?.lookAt(p)}
-          onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined} />
+          onRemoveLine={editable ? (id) => edit({ kind: 'removeLine', id }) : undefined}
+          headways={Object.fromEntries((proposed?.transitLines ?? []).map((l) => [l.id, l.headwayMin]))}
+          onHeadway={editable ? (id, m) => edit({ kind: 'setLine', id, patch: { headwayMin: m } }) : undefined} />
       )}
 
       <SimBar

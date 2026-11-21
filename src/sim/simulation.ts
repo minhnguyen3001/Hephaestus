@@ -100,6 +100,10 @@ interface Line {
 
 export type TrainLevel = 'ground' | 'elevated' | 'deck' | 'under';
 
+/** Distinct colours so mapped lines can be told apart (illustrative: OSM route colours aren't in the data packs). */
+const LINE_COLORS = [0x9b59b6, 0xe67e22, 0x2980b9, 0xc0392b, 0x27ae60, 0xd4ac0d, 0x16a5a5, 0xe84393];
+const METRO_GAP = 250; // metres between trains on one track (a simple block signal)
+
 interface MetroTrain {
   line: number;
   s: number;
@@ -248,6 +252,11 @@ export interface SimParams {
 const WEATHER_SPEED: Record<Weather, number> = { clear: 1, rain: 0.85, snow: 0.65, fog: 0.85 };
 
 /** Daily travel-demand curve in [0,1]. Weekdays: AM/PM commute peaks; weekends: one broad leisure peak. */
+/** Vehicles needed per direction so one leaves each end every `headwayMin` (capped to keep the scene light). */
+export function vehiclesFor(oneWaySeconds: number, headwayMin: number): number {
+  return Math.max(1, Math.min(30, Math.ceil(oneWaySeconds / (headwayMin * 60))));
+}
+
 export function demandAt(hour: number, day: DayType = 'weekday'): number {
   const g = (mu: number, w: number) => Math.exp(-((hour - mu) ** 2) / (2 * w * w));
   if (day === 'weekend') return Math.min(1, (hour < 6 ? 0.07 : 0.1) + 0.68 * g(14.5, 3.2) + 0.15 * g(21, 1.5));
@@ -545,7 +554,9 @@ export class Simulation {
         const back = build([...nodes].reverse());
         if (!fwd || !back) continue;
         const len = fwd[0].reduce((l, e) => l + g.edges[e].len, 0);
-        this.addBusLine({ id: spec.id, name: spec.name, color: spec.color, generated: false }, [fwd[0], back[0]], [fwd[1], back[1]], Math.max(1, Math.round(len / 900)));
+        // one-way trip ≈ 6 m/s running plus 20 s per stop; vehicles per direction cover it at the chosen headway
+        const perDir = spec.headwayMin ? vehiclesFor(len / 6 + nodes.length * 20, spec.headwayMin) : Math.max(1, Math.round(len / 900));
+        this.addBusLine({ id: spec.id, name: spec.name, color: spec.color, generated: false }, [fwd[0], back[0]], [fwd[1], back[1]], perDir);
       } else {
         const pts = spec.stops;
         const cum = [0];
@@ -561,7 +572,7 @@ export class Simulation {
           id: spec.id, name: spec.name, mode: 'metro', color: spec.color, generated: false,
           stopSeq: [ids, [...ids].reverse()], poly, stationS: cum, boardings: 0, level: 'deck', cars: 3, carLen: 16,
         });
-        const n = Math.max(2, Math.ceil(poly.len / 900));
+        const n = spec.headwayMin ? 2 * vehiclesFor(poly.len / 12 + pts.length * 25, spec.headwayMin) : Math.max(2, Math.ceil(poly.len / 900));
         for (let k = 0; k < n; k++) {
           const dir: 1 | -1 = k % 2 ? -1 : 1;
           const idx = Math.min(cum.length - 1, Math.floor((k / n) * cum.length));
@@ -666,7 +677,7 @@ export class Simulation {
     const ends = [kept[0].name, kept[kept.length - 1].name];
     this.transit.push({
       id: `osm-rail-${n}`, name: ends[0] && ends[1] ? `${label}: ${ends[0]} – ${ends[1]}` : `${label} line ${n + 1}`,
-      mode: 'metro', color: l.kind === 'subway' ? 0x9b59b6 : tram ? 0x16a085 : 0x7f8c8d, generated: true, real: true,
+      mode: 'metro', color: tram ? 0x16a085 : l.kind === 'subway' || l.kind === 'light_rail' ? LINE_COLORS[n % LINE_COLORS.length] : 0x7f8c8d, generated: true, real: true,
       stopSeq: [ids, [...ids].reverse()], poly: { ...poly, len: poly.len }, stationS: kept.map((k) => k.s), boardings: 0,
       level: l.underground ? 'under' : l.elevated ? 'elevated' : 'ground', cars: tram ? 2 : 4, carLen: tram ? 14 : 18,
     });
@@ -1165,8 +1176,20 @@ export class Simulation {
     }
     const target = st[t.next];
     const remaining = Math.abs(target - t.s);
-    t.v = Math.min(22, t.v + 1 * dt, Math.sqrt(2 * 1 * Math.max(0, remaining - 0.3)) + 0.3);
-    t.s += t.dir * Math.min(remaining, t.v * dt);
+    // block spacing: stay METRO_GAP behind the next train ahead in the same direction, and never enter a
+    // station another train is still standing at (that also keeps trains from piling up at terminals)
+    const me = this.metros.indexOf(t);
+    let room = Infinity;
+    this.metros.forEach((o, i) => {
+      if (o === t || o.line !== t.line) return;
+      const ahead = (o.s - t.s) * t.dir;
+      if (o.dir === t.dir && (ahead > 0 || (ahead === 0 && i < me))) room = Math.min(room, ahead - METRO_GAP);
+      if (o.dwell > 0 && Math.abs(o.s - target) < 1) room = Math.min(room, remaining - METRO_GAP);
+    });
+    const step = Math.max(0, Math.min(remaining, room));
+    t.v = Math.min(22, t.v + 1 * dt, Math.sqrt(2 * 1 * Math.max(0, Math.min(remaining - 0.3, room))) + 0.3);
+    if (room <= 0) t.v = 0;
+    t.s += t.dir * Math.min(step, t.v * dt);
     if (Math.abs(target - t.s) < 0.05) {
       t.s = target;
       t.v = 0;

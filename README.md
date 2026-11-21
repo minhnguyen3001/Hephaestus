@@ -20,7 +20,7 @@ A browser-based 3D city-building and urban-planning simulator built on **real-wo
   - Place buildings.
   - Draw roads. They form real intersections and T-junctions with existing streets.
   - Bulldoze buildings and roads, and change height and land use.
-  - **Draw bus lines and elevated metro lines.**
+  - **Draw bus lines and elevated metro lines**, and set how often each one runs.
   - Undo and redo.
 - **Scenarios**: real-world data stays untouched. Your proposal is a list of edits, toggled against the **Original** city. Projects autosave locally.
 - **Living city simulation** (synthetic agents, run in a Web Worker):

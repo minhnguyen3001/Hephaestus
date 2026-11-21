@@ -228,6 +228,23 @@ describe('simulation', () => {
     expect(sim.trainCars().some((c) => c.color === 0x8e44ad)).toBe(true);
   });
 
+  it('runs a line at the chosen headway and keeps trains apart', () => {
+    const base = gridFixture(700);
+    const stops: [number, number][] = [[-1400, -1400], [-700, -1400], [0, -1400], [700, -1400], [1400, -1400]];
+    const line = (headwayMin?: number) => applyEdits(base, [{ kind: 'addLine', line: { id: 'a', name: 'A', mode: 'metro', stops, color: 1, headwayMin } }]);
+    const vehicles = (w: ReturnType<typeof line>) => new Simulation(w, profileFor('us'), 50, 2).stats().lines.find((l) => l.id === 'a')!.vehicles;
+    const frequent = applyEdits(line(), [{ kind: 'setLine', id: 'a', patch: { headwayMin: 2 } }]);
+    expect(vehicles(frequent)).toBeGreaterThan(vehicles(line(15)));
+    const sim = new Simulation(frequent, profileFor('us'), 50, 2);
+    let closest = Infinity;
+    for (let i = 0; i < 600; i++) {
+      sim.step(1);
+      const ms = (sim as unknown as { metros: { s: number; dir: number; dwell: number }[] }).metros;
+      for (const a of ms) for (const b of ms) if (a !== b && a.dir === b.dir && a.dwell <= 0 && b.dwell <= 0) closest = Math.min(closest, Math.abs(a.s - b.s));
+    }
+    expect(closest).toBeGreaterThan(200);
+  });
+
   it('riders transfer between two lines that meet', () => {
     const base = gridFixture(700); // a 2.8 km grid, so riding two lines beats walking
     // Line A runs along the south street west→east; line B runs up the east street. They meet in the SE corner.
