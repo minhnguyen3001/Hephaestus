@@ -80,12 +80,14 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const [events, setEvents] = useState<CityEvent[]>([]);
   const statsRef = useRef<SimStats | null>(null);
   statsRef.current = stats;
-  const hourlyRef = useRef<(number | null)[]>(Array(24).fill(null));
-  if (stats) {
-    // smoothed congestion per simulated hour, for the dashboard chart
+  // smoothed congestion per simulated hour, kept separately for the real city and the proposal (before/after chart)
+  const hourlyRef = useRef({ original: Array<number | null>(24).fill(null), proposed: Array<number | null>(24).fill(null) });
+  const settleRef = useRef(0); // ignore stats while the simulation re-seeds after a switch or an edit
+  if (stats && performance.now() > settleRef.current) {
+    const series = hourlyRef.current[view];
     const h = Math.floor(stats.time / 3600) % 24;
-    const prev = hourlyRef.current[h];
-    hourlyRef.current[h] = prev === null ? stats.congestion : prev * 0.9 + stats.congestion * 0.1;
+    const prev = series[h];
+    series[h] = prev === null ? stats.congestion : prev * 0.9 + stats.congestion * 0.1;
   }
   const [zoneOpts, setZoneOpts] = useState<ZoneOptions>({ use: 'mixed', density: 'medium', replace: false });
   const [dashOpen, setDashOpen] = useState(() => window.innerWidth > 900);
@@ -121,6 +123,13 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   const region = useMemo(() => profileFor(project.place.countryCode), [project.place.countryCode]);
   const proposed = useMemo(() => (base ? applyEdits(base, history.edits) : null), [base, history.edits]);
   const shown = view === 'original' ? base : proposed;
+  const seenRef = useRef({ view, edits: history.edits });
+  if (seenRef.current.view !== view || seenRef.current.edits !== history.edits) {
+    // the simulated city changed: wait for it to re-seed, and drop the proposal's traffic if the plan was edited
+    if (seenRef.current.edits !== history.edits) hourlyRef.current.proposed = Array(24).fill(null);
+    seenRef.current = { view, edits: history.edits };
+    settleRef.current = performance.now() + 8000;
+  }
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const originalMetrics = useMemo(() => (base ? cityMetrics(base) : null), [base]);
@@ -389,6 +398,16 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     engine.current?.setContext(ctxTiles, { radius: project.radius, tiles: detailKeys });
   }, [ctxTiles, detailKeys, terrainRef, project.radius, quality, mode]);
 
+  const saveImage = () => {
+    const url = engine.current?.snapshot();
+    if (!url) return;
+    const t = statsRef.current?.time ?? 0;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ptah-${project.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${view}-${String(Math.floor(t / 3600)).padStart(2, '0')}${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}.png`;
+    a.click();
+  };
+
   const loadDetail = (p: Vec2) => {
     const s = streamRef.current;
     if (!s) return;
@@ -524,6 +543,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
             {project.scenarios.length > 1 && <option value="__del">Delete this scenario</option>}
           </select>
           <button className="share-btn" onClick={share} title="Copy a link to this plan">Share</button>
+          <button className="ghost hide-sm" onClick={saveImage} title="Download a picture of this view">Save image</button>
           <select value={quality} onChange={(e) => {
             const q = e.target.value as QualitySetting;
             setQuality(q);
@@ -603,7 +623,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
         {dashOpen ? 'Hide' : 'Show'} dashboard
       </button>
       {dashOpen && proposedMetrics && originalMetrics && (
-        <Dashboard hourly={hourlyRef.current} stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon}
+        <Dashboard hourly={hourlyRef.current} hourlyView={view} stats={stats} proposed={proposedMetrics} original={originalMetrics} region={region} editCount={history.edits.length} comparison={comparison} horizon={horizon}
           challenge={project.challenge}
           suggestedChallenge={suggested(project.place.name, project.place.countryCode)?.id}
           onChallenge={(id) => commit({ ...projectRef.current, challenge: id })}
@@ -625,7 +645,7 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
           engine.current?.setTime(t);
           if (stats) setStats({ ...stats, time: t });
         }}
-        onReset={() => { hourlyRef.current = Array(24).fill(null); engine.current?.resetSim(); }}
+        onReset={() => { hourlyRef.current = { original: Array(24).fill(null), proposed: Array(24).fill(null) }; engine.current?.resetSim(); }}
         day={day} onDay={setDay} horizon={horizon} onHorizon={setHorizon} growth={region.growth} weather={weather} onWeather={setWeather}
         lon={project.place.lon} traffic={layers.traffic} onTraffic={(on) => setLayers({ ...layers, traffic: on })}
       />

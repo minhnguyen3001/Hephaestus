@@ -66,6 +66,8 @@ export interface WorldRenderer {
   setSimParams(p: SimParams): void;
   lookAt(p: Vec2): void;
   roadSpeeds(): Map<string, number>;
+  /** PNG data URL of the current view. */
+  snapshot(): string;
   dispose(): void;
 }
 
@@ -1115,6 +1117,12 @@ export class Engine implements WorldRenderer {
 
   roadSpeeds() {
     return this.sim?.roadSpeed ?? new Map<string, number>();
+  }
+
+  snapshot() {
+    // the drawing buffer is cleared after compositing, so render and read in the same task
+    this.renderer.render(this.scene, this.camera);
+    return this.renderer.domElement.toDataURL('image/png');
   }
 
   private simParams: SimParams = { day: 'weekday', demandScale: 1, weather: 'clear', events: [] };

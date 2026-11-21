@@ -12,6 +12,8 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 - [ ] 3D High in dense cities needs a real-GPU check (software GL is too noisy to judge)
 
 ## P1
+- [x] Before/after traffic: the congestion-by-hour chart keeps separate series for the real city and the proposal, and compares the hours both have run; editing the plan clears the proposal's series (2026-11-20)
+- [x] "Save image" downloads a PNG of the current 3D or 2D view (2026-11-20)
 - [x] Lower latency with the agent count unchanged: scheduled shadow map, no agent shadows, High pixel ratio 1.5, faster Auto. Tile merges and ring builds no longer stall frames; parsing moved off the main thread (2026-11-20)
 - [ ] Shibuya still has occasional 55–100 ms tasks while tiles stream (single dense chunk builds, the React merge render, structured-clone of the world on sim restart)
 - [x] Busier, more realistic streets: 3× agent caps, a higher overnight demand floor. Readable nights: moonlight, windows lit by hour, no window static (2026-11-20)

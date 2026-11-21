@@ -190,6 +190,10 @@ export class Plan2D implements WorldRenderer {
     return this.sim?.roadSpeed ?? new Map<string, number>();
   }
 
+  snapshot() {
+    return this.canvas.toDataURL('image/png');
+  }
+
   private simParams: SimParams = { day: 'weekday', demandScale: 1, weather: 'clear', events: [] };
   setSimParams(p: SimParams) {
     this.simParams = p;

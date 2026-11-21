@@ -249,22 +249,44 @@ export function SimBar({
 }
 
 /** Congestion by simulated hour, filled in as the clock passes each hour (or you jump to it). */
-function HourlyCongestion({ hourly, now }: { hourly: (number | null)[]; now: number }) {
-  if (!hourly.some((v) => v !== null)) return null;
+type Hourly = { original: (number | null)[]; proposed: (number | null)[] };
+
+/** Congestion by simulated hour for the real city and the proposal, filled in as the clock passes each hour. */
+function HourlyCongestion({ hourly, view, now }: { hourly: Hourly; view: 'original' | 'proposed'; now: number }) {
+  const has = (s: (number | null)[]) => s.some((v) => v !== null);
+  if (!has(hourly.original) && !has(hourly.proposed)) return null;
+  const both = has(hourly.original) && has(hourly.proposed);
+  const pct = (v: number | null) => (v === null ? 'not simulated yet' : `${Math.round(v * 100)}% congested`);
+  const bar = (v: number | null, cls: string) => (
+    <i className={cls} style={{ height: v === null ? '2px' : `${Math.max(4, v * 100)}%`, background: v === null ? undefined : cls === 'o' ? undefined : `hsl(${120 - Math.min(1, v * 2) * 120} 65% 45%)` }} />
+  );
+  // hours simulated in both: the honest comparison
+  const shared = hourly.original.map((o, h) => (o !== null && hourly.proposed[h] !== null ? [o, hourly.proposed[h]!] : null)).filter((x): x is number[] => !!x);
+  const avg = (i: number) => shared.reduce((s, x) => s + x[i], 0) / shared.length;
   return (
-    <div className="hourly" role="img" aria-label="Congested vehicles by hour of day">
+    <div className="hourly" role="img" aria-label="Congested vehicles by hour of day, real city and proposal">
       <div className="hourly-bars">
-        {hourly.map((v, h) => (
-          <span key={h} className={h === Math.floor(now / 3600) ? 'now' : ''} title={`${String(h).padStart(2, '0')}:00 ${v === null ? 'not simulated yet' : `${Math.round(v * 100)}% congested`}`}
-            style={{ height: v === null ? '2px' : `${Math.max(4, v * 100)}%`, background: v === null ? undefined : `hsl(${120 - Math.min(1, v * 2) * 120} 65% 45%)` }} />
+        {hourly.proposed.map((v, h) => (
+          <span key={h} className={h === Math.floor(now / 3600) ? 'now' : ''} title={`${String(h).padStart(2, '0')}:00 · real city: ${pct(hourly.original[h])} · proposal: ${pct(v)}`}>
+            {both || view === 'original' ? bar(hourly.original[h], 'o') : null}
+            {both || view === 'proposed' ? bar(v, 'p') : null}
+          </span>
         ))}
       </div>
       <div className="hourly-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+      {both ? (
+        <p className="note">
+          <span className="key o" /> Real city <span className="key p" /> Proposal
+          {shared.length > 0 && <> · same hours: {Math.round(avg(0) * 100)}% → {Math.round(avg(1) * 100)}% congested</>}
+        </p>
+      ) : (
+        <p className="note">Switch between Original and Proposed and run the same hours to compare traffic.</p>
+      )}
     </div>
   );
 }
 
-export function Dashboard({ headways, onHeadway, hourly, stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { headways?: Record<string, number | undefined>; onHeadway?: (id: string, min: number | undefined) => void; hourly?: (number | null)[]; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
+export function Dashboard({ headways, onHeadway, hourly, hourlyView = 'proposed', stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { headways?: Record<string, number | undefined>; onHeadway?: (id: string, min: number | undefined) => void; hourly?: Hourly; hourlyView?: 'original' | 'proposed'; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
@@ -399,7 +421,7 @@ export function Dashboard({ headways, onHeadway, hourly, stats, proposed, origin
             <Metric label="Transfers" value={fmt(stats.transfers)} />
             <Metric label="Cruising for parking" value={fmt(stats.cruising)} warn={stats.cruising > 20} />
           </div>
-          {hourly && <HourlyCongestion hourly={hourly} now={stats.time} />}
+          {hourly && <HourlyCongestion hourly={hourly} view={hourlyView} now={stats.time} />}
           <div className="kinds">
             {AGENT_KINDS.map((k) => (
               <span key={k}>{KIND_LABEL[k]} <b>{stats.active[k]}</b></span>

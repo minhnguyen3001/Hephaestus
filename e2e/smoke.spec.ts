@@ -136,6 +136,13 @@ test('traffic layer and signals (Manhattan pack)', async ({ page }) => {
   await page.getByRole('button', { name: 'Traffic', exact: true }).click();
   await expect(page.getByLabel('Traffic flow')).toBeChecked();
   await expect(page.locator('.hourly')).toBeVisible({ timeout: 10_000 });
+  // the same hour on the real city fills the second series: a before/after comparison
+  await page.getByRole('button', { name: 'Original', exact: true }).click();
+  await expect(page.locator('.hourly')).toContainText('Real city', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Proposed', exact: true }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save image' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^ptah-.*\.png$/);
   await page.getByRole('button', { name: 'Hide dashboard' }).click();
   await page.getByRole('button', { name: '20×' }).click();
   await page.waitForTimeout(6000);
