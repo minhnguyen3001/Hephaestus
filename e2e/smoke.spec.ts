@@ -416,3 +416,22 @@ test('city-ring buildings can be inspected in the 2D plan', async ({ page }) => 
     }
   expect(found).toBe(true);
 });
+
+test('an event crowd snaps to a nearby mapped venue', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('gcs.onboarded.v1', '1'); localStorage.setItem('gcs.view', '2d'); });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Midtown Manhattan/ }).click();
+  await expect(page.locator('.attribution')).toContainText('buildings', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Hide dashboard' }).click();
+  await page.getByRole('button', { name: 'Event crowd' }).click();
+  const box = (await page.locator('.viewport canvas').boundingBox())!;
+  // Midtown is full of theatres: some click should land within 150 m of one
+  let snapped = false;
+  for (const [fx, fy] of [[0.5, 0.5], [0.45, 0.45], [0.55, 0.4], [0.4, 0.55], [0.6, 0.6], [0.5, 0.35]]) {
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+    const hint = await page.locator('.hint').innerText();
+    expect(hint).toMatch(/will start arriving now/);
+    if (/Show at|Game at|Concert at/.test(hint)) { snapped = true; break; }
+  }
+  expect(snapped).toBe(true);
+});

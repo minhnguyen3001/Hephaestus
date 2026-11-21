@@ -1,4 +1,4 @@
-import type { Area, Building, Vec2, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
+import type { Venue, Area, Building, Vec2, BuildingUse, LatLon, Rail, RailKind, Road, RoadKind, WorldData } from './types';
 import { clipPolygonRect, coastlineWater, isClosed, joinWays } from './polygons';
 import { hash01, makeProjection, pointInPolygon, signedArea } from './util';
 import { offThread } from './offthread';
@@ -171,6 +171,25 @@ function parseSpeed(v: string | undefined, kind: RoadKind): number {
   return v!.includes('mph') ? n * 1.609 : n;
 }
 
+/** Venue from OSM tags. Seats come from `capacity` when mapped, else a rough estimate from the footprint. */
+export function venueOf(tags: Record<string, string>, footprint: Vec2[]): Venue | undefined {
+  const b = tags.building ?? '';
+  const a = tags.amenity ?? '';
+  const kind: Venue['kind'] | null =
+    tags.leisure === 'stadium' || b === 'stadium' ? 'stadium'
+      : b === 'arena' || b === 'sports_hall' || tags.leisure === 'sports_centre' ? 'arena'
+        : a === 'theatre' || b === 'theatre' || a === 'cinema' ? 'theatre'
+          : a === 'concert_hall' || a === 'events_venue' || a === 'arts_centre' || a === 'conference_centre' ? 'hall'
+            : null;
+  if (!kind) return undefined;
+  const mapped = Number.parseInt((tags.capacity ?? '').replace(/[^0-9]/g, ''), 10);
+  if (mapped > 50) return { kind, capacity: Math.min(120_000, mapped), estimated: false };
+  // seats per m² of footprint: stands fill most of a stadium; a theatre is mostly stage, lobby and backstage
+  const perM2 = { stadium: 1.6, arena: 1.0, theatre: 0.5, hall: 0.6 }[kind];
+  const area = Math.abs(signedArea(footprint));
+  return { kind, capacity: Math.round(Math.max(150, Math.min(90_000, area * perM2)) / 50) * 50, estimated: true };
+}
+
 export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, radius: number, bounds?: Bounds, tag = ''): WorldData {
   const proj = makeProjection(center);
   const buildings: Building[] = [];
@@ -218,7 +237,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
         outers.forEach((footprint, k) => {
           if (Math.abs(signedArea(footprint)) < 6) return;
           const { height, source: heightSource } = parseHeight(tags, use, rid);
-          buildings.push({ id: `${rid}-${k}`, footprint, height, heightSource, use, useSource: source, name: tags.name, origin: 'real' });
+          buildings.push({ id: `${rid}-${k}`, footprint, height, heightSource, use, useSource: source, name: tags.name, origin: 'real', venue: venueOf(tags, footprint) });
         });
         continue;
       }
@@ -241,7 +260,7 @@ export function parseOverpass(json: { elements: OsmElement[] }, center: LatLon, 
       if (Math.abs(signedArea(footprint)) < 6) continue;
       const { use, source } = classifyUse(tags);
       const { height, source: heightSource } = parseHeight(tags, use, id);
-      buildings.push({ id, footprint, height, heightSource, use, useSource: source, name: tags.name, origin: 'real' });
+      buildings.push({ id, footprint, height, heightSource, use, useSource: source, name: tags.name, origin: 'real', venue: venueOf(tags, footprint) });
       continue;
     }
 
@@ -332,7 +351,7 @@ interface Pack {
 export const packFile = (c: LatLon) => `${c.lat.toFixed(4)}_${c.lon.toFixed(4)}.json`;
 
 const KEEP_TAGS = new Set([
-  'building', 'building:levels', 'height', 'amenity', 'shop', 'office', 'name', 'highway', 'oneway', 'junction', 'lanes',
+  'building', 'building:levels', 'height', 'amenity', 'capacity', 'shop', 'office', 'name', 'highway', 'oneway', 'junction', 'lanes',
   'maxspeed', 'bridge', 'tunnel', 'layer', 'area', 'railway', 'natural', 'waterway', 'landuse', 'leisure', 'type',
   'public_transport', 'station', 'cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both',
 ]);

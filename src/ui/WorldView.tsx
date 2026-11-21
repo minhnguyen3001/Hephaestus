@@ -13,7 +13,8 @@ import { Plan2D } from '../render/plan2d';
 import { PRESETS, resolveQuality, type QualitySetting } from '../render/quality';
 import { profileFor } from '../sim/region';
 import type { CityEvent, DayType, SimStats, Weather } from '../sim/simulation';
-import type { Vec2 } from '../geo/types';
+import type { Building, Vec2 } from '../geo/types';
+import { centroid } from '../geo/util';
 import { cityMetrics } from './metrics';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
@@ -170,9 +171,21 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
       onPlaceEvent: (p: Vec2) => {
         const now = statsRef.current?.time ?? 7.5 * 3600;
         const start = Math.ceil((now + 3600) / 900) * 900 % 86400;
-        const attendance = 8000;
-        setEvents((es) => [...es, { id: `ev-${Date.now().toString(36)}`, p, start, attendance, name: es.length % 2 ? 'Stadium game' : 'Concert' }]);
-        setHint(`Event at ${String(Math.floor(start / 3600)).padStart(2, '0')}:${String(Math.floor((start % 3600) / 60)).padStart(2, '0')} — 8,000 people will start arriving now. Speed up time and watch the streets and transit.`);
+        // snap to a mapped venue nearby (stadium, arena, theatre, hall) and use its size; otherwise a generic crowd
+        const venue = (shownRef.current?.buildings ?? []).reduce<{ b: Building; c: Vec2; d: number } | null>((best, b) => {
+          if (!b.venue) return best;
+          const c = centroid(b.footprint);
+          const d = Math.hypot(c[0] - p[0], c[1] - p[1]);
+          return d < 150 && (!best || d < best.d) ? { b, c, d } : best;
+        }, null);
+        const v = venue?.b.venue;
+        const attendance = v ? v.capacity : 8000;
+        const label = { stadium: 'Game', arena: 'Game', theatre: 'Show', hall: 'Concert' };
+        const name = venue && v ? `${label[v.kind]} at ${venue.b.name ?? `this ${v.kind}`}` : 'Concert';
+        setEvents((es) => [...es, { id: `ev-${Date.now().toString(36)}`, p: venue?.c ?? p, start, attendance, name }]);
+        const at = `${String(Math.floor(start / 3600)).padStart(2, '0')}:${String(Math.floor((start % 3600) / 60)).padStart(2, '0')}`;
+        const size = v ? `${attendance.toLocaleString()} people (${v.estimated ? 'capacity estimated from the building size' : 'capacity from OpenStreetMap'})` : '8,000 people (no mapped venue here, so a typical concert crowd)';
+        setHint(`${name} at ${at}: ${size} will start arriving now. Speed up time and watch the streets and transit.`);
       },
     };
     let r: WorldRenderer;

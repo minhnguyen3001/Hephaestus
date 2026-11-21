@@ -128,6 +128,7 @@ function BuildingInspector({ b, editable, onEdit, onFocus }: { b: Building; edit
         <dt>Footprint</dt><dd>{fmt(area)} m²</dd>
         <dt>Est. residents</dt><dd>{fmt(cap.residents)}</dd>
         <dt>Est. jobs</dt><dd>{fmt(cap.jobs)}</dd>
+        {b.venue && <><dt>Venue</dt><dd>{b.venue.kind} · {b.venue.estimated ? '~' : ''}{fmt(b.venue.capacity)} seats{b.venue.estimated ? ' (estimated)' : ''}</dd></>}
       </dl>
       <div className="row">
         <button onClick={onFocus}>Orbit 360°</button>

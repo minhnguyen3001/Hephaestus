@@ -46,4 +46,15 @@ describe('polygons', () => {
     expect(trimLine([[0, 0], [10, 0], [10, 10]], 2, 3)).toEqual([[2, 0], [10, 0], [10, 7]]);
     expect(trimLine([[0, 0], [5, 0]], 3, 3)).toBeNull();
   });
+
+  it('reads event venues from OSM tags, estimating seats when unmapped', async () => {
+    const { venueOf } = await import('./osm');
+    const sq: [number, number][] = [[0, 0], [100, 0], [100, 100], [0, 100]];
+    expect(venueOf({ building: 'yes' }, sq)).toBeUndefined();
+    expect(venueOf({ amenity: 'theatre', capacity: '1,450' }, sq)).toEqual({ kind: 'theatre', capacity: 1450, estimated: false });
+    const st = venueOf({ building: 'stadium' }, sq)!;
+    expect(st.kind).toBe('stadium');
+    expect(st.estimated).toBe(true);
+    expect(st.capacity).toBe(16000);
+  });
 });

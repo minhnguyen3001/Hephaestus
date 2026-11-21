@@ -35,6 +35,14 @@ export interface Building {
   useSource: 'osm' | 'estimated' | 'user';
   name?: string;
   origin: Origin;
+  /** Event venue (stadium, arena, theatre, hall): seats from OSM `capacity`, or estimated from floor area. */
+  venue?: Venue;
+}
+
+export interface Venue {
+  kind: 'stadium' | 'arena' | 'theatre' | 'hall';
+  capacity: number;
+  estimated: boolean;
 }
 
 export type RoadKind =

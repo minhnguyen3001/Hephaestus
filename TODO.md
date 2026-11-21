@@ -29,7 +29,7 @@ Owner rules: zero cost; GitHub on autopilot (commit, push, deploy); honest label
 
 ## P2
 - [ ] More roof shapes (hipped, flat with parapets) and regional facade palettes
-- [ ] Stadium and arena presets for event crowds, detected from OSM `leisure=stadium`
+- [x] Event crowds snap to a mapped venue within 150 m (stadium, arena, theatre, hall). Crowd size comes from OSM `capacity`, or an estimate from the footprint, labelled as such; the inspector shows venue seats (2026-11-20)
 - [ ] Network-based walk isochrones (access metrics currently use straight-line distance)
 - [ ] Scheduled GitHub Action (free on a public repo) to refresh packs and tiles monthly
 - [ ] Lane changes and intersection conflict resolution between turning vehicles
