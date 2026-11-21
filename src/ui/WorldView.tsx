@@ -15,7 +15,8 @@ import { profileFor } from '../sim/region';
 import type { CityEvent, DayType, SimStats, Weather } from '../sim/simulation';
 import type { Building, Vec2 } from '../geo/types';
 import { centroid } from '../geo/util';
-import { cityMetrics } from './metrics';
+import { accessJob, cityMetrics, computeAccess, type Access } from './metrics';
+import { offThread } from '../geo/offthread';
 import { Dashboard, fmt, Inspector, SimBar } from './Panels';
 import { SearchBox } from './SearchBox';
 import { Tour, type TourSignals } from './Tour';
@@ -133,16 +134,21 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
   }
   const shownRef = useRef(shown);
   shownRef.current = shown;
-  const originalMetrics = useMemo(() => (base ? cityMetrics(base) : null), [base]);
+  const comparisonWorlds = useMemo(
+    () => (base && project.scenarios.length > 1 ? project.scenarios.map((s) => applyEdits(base, s.id === project.active ? history.edits : s.edits)) : []),
+    [base, project.scenarios, project.active, history.edits],
+  );
+  const access = useAccess([base, proposed, ...comparisonWorlds]);
+  const originalMetrics = useMemo(() => (base ? cityMetrics(base, access(0)) : null), [base, access]);
   const activeScenario = project.scenarios.find((s) => s.id === project.active)!;
   // Static indicators for every scenario, for side-by-side comparison (the active one uses live edits).
   const comparison = useMemo(
-    () => (base && project.scenarios.length > 1
-      ? project.scenarios.map((s) => ({ name: s.name, active: s.id === project.active, metrics: cityMetrics(applyEdits(base, s.id === project.active ? history.edits : s.edits)) }))
+    () => (comparisonWorlds.length
+      ? project.scenarios.map((s, i) => ({ name: s.name, active: s.id === project.active, metrics: cityMetrics(comparisonWorlds[i], access(2 + i)) }))
       : null),
-    [base, project.scenarios, project.active, history.edits],
+    [comparisonWorlds, project.scenarios, project.active, access],
   );
-  const proposedMetrics = useMemo(() => (proposed ? cityMetrics(proposed) : null), [proposed]);
+  const proposedMetrics = useMemo(() => (proposed ? cityMetrics(proposed, access(1)) : null), [proposed, access]);
 
   const edit = useCallback((e: Edit) => {
     if (viewRef.current === 'original') {
@@ -728,3 +734,37 @@ export default function WorldView({ project: initial, onExit, onOpenPlace }: { p
     </div>
   );
 }
+
+/**
+ * Walk-access shares for a list of worlds, computed in the background worker.
+ * Each slot keeps its last known value until the new one arrives, so the dashboard never flickers to blank.
+ */
+const accessCache = new WeakMap<WorldData, Access>();
+const accessPending = new WeakSet<WorldData>();
+function useAccess(worlds: (WorldData | null | undefined)[]): (slot: number) => Access | null {
+  const [version, bump] = useState(0);
+  const last = useRef<(Access | null)[]>([]);
+  useEffect(() => {
+    for (const w of worlds) {
+      if (!w || accessCache.has(w) || accessPending.has(w)) continue;
+      accessPending.add(w);
+      const job = accessJob(w);
+      offThread({ kind: 'access', job }, () => computeAccess(job))
+        .then((a) => {
+          accessCache.set(w, a);
+          bump((v) => v + 1);
+        })
+        .catch(() => accessPending.delete(w));
+    }
+  });
+  // a stable function while nothing changed, so metrics memos downstream don't recompute
+  const memo = useRef<{ ws: unknown[]; v: number; fn: (slot: number) => Access | null } | null>(null);
+  const m = memo.current;
+  if (!m || m.v !== version || m.ws.length !== worlds.length || m.ws.some((w, i) => w !== worlds[i])) {
+    const now = worlds.map((w, i) => (w && accessCache.get(w)) || last.current[i] || null);
+    last.current = now;
+    memo.current = { ws: worlds, v: version, fn: (slot: number) => now[slot] ?? null };
+  }
+  return memo.current!.fn;
+}
+

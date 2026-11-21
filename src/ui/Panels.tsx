@@ -287,12 +287,15 @@ function HourlyCongestion({ hourly, view, now }: { hourly: Hourly; view: 'origin
   );
 }
 
+/** A share as a percentage, or an ellipsis while it's still being worked out. */
+const pctOr = (v: number, suffix = '') => (Number.isFinite(v) ? `${Math.round(v * 100)}%${suffix}` : '…');
+
 export function Dashboard({ headways, onHeadway, hourly, hourlyView = 'proposed', stats, proposed, original, region, editCount, comparison, onRemoveLine, horizon = 0, challenge, onChallenge, suggestedChallenge, insights, onLook, notes, onRemoveNote, events, onRemoveEvent }: { headways?: Record<string, number | undefined>; onHeadway?: (id: string, min: number | undefined) => void; hourly?: Hourly; hourlyView?: 'original' | 'proposed'; stats: SimStats | null; proposed: CityMetrics; original: CityMetrics; region: RegionProfile; editCount: number; comparison?: { name: string; active: boolean; metrics: CityMetrics }[] | null; onRemoveLine?: (id: string) => void; horizon?: number; challenge?: string; onChallenge: (id: string | undefined) => void; suggestedChallenge?: string; insights?: Insight[]; onLook?: (p: Vec2) => void; notes?: Note[]; onRemoveNote?: (id: string) => void; events?: CityEvent[]; onRemoveEvent?: (id: string) => void }) {
   const ch = CHALLENGES.find((c) => c.id === challenge);
   const result = ch && evaluate(ch, proposed, original, stats);
   const delta = (a: number, b: number, digits = 0) => {
     const d = a - b;
-    if (Math.abs(d) < 10 ** -digits / 2) return null;
+    if (!Number.isFinite(d) || Math.abs(d) < 10 ** -digits / 2) return null;
     return <span className={d > 0 ? 'up' : 'down'}>{d > 0 ? '+' : ''}{digits ? d.toFixed(digits) : fmt(d)}</span>;
   };
   const active = stats ? AGENT_KINDS.reduce((s, k) => s + stats.active[k], 0) : 0;
@@ -379,8 +382,8 @@ export function Dashboard({ headways, onHeadway, hourly, hourlyView = 'proposed'
         <Metric label="Road network" value={`${proposed.roadKm.toFixed(1)} km`} d={delta(proposed.roadKm, original.roadKm, 1)} />
         <Metric label="Bike network" value={`${proposed.bikeKm.toFixed(1)} km`} d={delta(proposed.bikeKm, original.bikeKm, 1)} />
         <Metric label="Green space" value={`${proposed.greenHa.toFixed(1)} ha`} d={delta(proposed.greenHa, original.greenHa, 1)} />
-        <Metric label="Near transit (400 m)" value={`${Math.round(proposed.transitAccess * 100)}% of residents`} d={delta(proposed.transitAccess * 100, original.transitAccess * 100)} />
-        <Metric label="Near a park (300 m)" value={`${Math.round(proposed.parkAccess * 100)}% of residents`} d={delta(proposed.parkAccess * 100, original.parkAccess * 100)} />
+        <Metric label="Transit within a 400 m walk" value={pctOr(proposed.transitAccess, ' of residents')} d={delta(proposed.transitAccess * 100, original.transitAccess * 100)} />
+        <Metric label="Park within a 300 m walk" value={pctOr(proposed.parkAccess, ' of residents')} d={delta(proposed.parkAccess * 100, original.parkAccess * 100)} />
         <Metric label="Buildings" value={fmt(proposed.buildings)} d={delta(proposed.buildings, original.buildings)} />
       </div>
       {comparison && (
@@ -392,7 +395,7 @@ export function Dashboard({ headways, onHeadway, hourly, hourlyView = 'proposed'
                 <tr><th /><th>Today</th>{comparison.map((c) => <th key={c.name} className={c.active ? 'on' : ''}>{c.name}</th>)}</tr>
               </thead>
               <tbody>
-                {([['Near transit', (m: CityMetrics) => `${Math.round(m.transitAccess * 100)}%`], ['Near park', (m: CityMetrics) => `${Math.round(m.parkAccess * 100)}%`], ['Housing', (m: CityMetrics) => fmt(m.residents)], ['Jobs', (m: CityMetrics) => fmt(m.jobs)], ['Floor km²', (m: CityMetrics) => m.floorAreaKm2.toFixed(2)], ['Road km', (m: CityMetrics) => m.roadKm.toFixed(1)], ['Buildings', (m: CityMetrics) => fmt(m.buildings)]] as const).map(([label, f]) => (
+                {([['Near transit', (m: CityMetrics) => pctOr(m.transitAccess)], ['Near park', (m: CityMetrics) => pctOr(m.parkAccess)], ['Housing', (m: CityMetrics) => fmt(m.residents)], ['Jobs', (m: CityMetrics) => fmt(m.jobs)], ['Floor km²', (m: CityMetrics) => m.floorAreaKm2.toFixed(2)], ['Road km', (m: CityMetrics) => m.roadKm.toFixed(1)], ['Buildings', (m: CityMetrics) => fmt(m.buildings)]] as const).map(([label, f]) => (
                   <tr key={label}><th>{label}</th><td>{f(original)}</td>{comparison.map((c) => <td key={c.name} className={c.active ? 'on' : ''}>{f(c.metrics)}</td>)}</tr>
                 ))}
               </tbody>

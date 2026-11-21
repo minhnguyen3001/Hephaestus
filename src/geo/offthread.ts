@@ -1,10 +1,12 @@
 import type { ContextTile } from './vectortiles';
 import type { LatLon, WorldData } from './types';
 import type { parseOverpass } from './osm';
+import type { Access, AccessJob } from '../ui/metrics';
 
 export type OffThreadJob =
   | { kind: 'overpass'; buf: ArrayBuffer; center: LatLon; radius: number; bounds?: Parameters<typeof parseOverpass>[3]; tag?: string }
-  | { kind: 'mvt'; buf: ArrayBuffer; center: LatLon; x: number; y: number };
+  | { kind: 'mvt'; buf: ArrayBuffer; center: LatLon; x: number; y: number }
+  | { kind: 'access'; job: AccessJob };
 
 let worker: Worker | null | undefined;
 let seq = 0;
@@ -37,12 +39,13 @@ function getWorker(): Worker | null {
 /** Run a parse in the background worker (the buffer is transferred), or inline where workers aren't available. */
 export function offThread(job: Extract<OffThreadJob, { kind: 'overpass' }>, inline: () => WorldData): Promise<WorldData>;
 export function offThread(job: Extract<OffThreadJob, { kind: 'mvt' }>, inline: () => ContextTile): Promise<ContextTile>;
+export function offThread(job: Extract<OffThreadJob, { kind: 'access' }>, inline: () => Access): Promise<Access>;
 export function offThread(job: OffThreadJob, inline: () => unknown): Promise<unknown> {
   const w = getWorker();
   if (!w) return Promise.resolve().then(inline);
   return new Promise((ok, fail) => {
     const id = ++seq;
     pending.set(id, { ok, fail });
-    w.postMessage({ id, job }, [job.buf]);
+    w.postMessage({ id, job }, [job.kind === 'access' ? job.job.homes.buffer : job.buf]);
   });
 }

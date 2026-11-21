@@ -350,7 +350,7 @@ describe('road editing and access metrics', () => {
   });
 
   it('a drawn transit line raises transit access', async () => {
-    const { cityMetrics } = await import('../ui/metrics');
+    const { cityMetricsSync: cityMetrics } = await import('../ui/metrics');
     const base = gridFixture();
     const before = cityMetrics(base).transitAccess;
     const w = applyEdits(base, [{ kind: 'addLine', line: { id: 'l', name: 'A', mode: 'bus', stops: [[-150, -150], [150, 150], [-150, 150]], color: 1 } }]);
@@ -414,7 +414,7 @@ describe('zoning', () => {
 describe('challenges', () => {
   it('evaluates goals against metrics', async () => {
     const { CHALLENGES, evaluate, suggested } = await import('../ui/challenges');
-    const { cityMetrics } = await import('../ui/metrics');
+    const { cityMetricsSync: cityMetrics } = await import('../ui/metrics');
     const base = gridFixture();
     const o = cityMetrics(base);
     const housing = CHALLENGES.find((c) => c.id === 'housing')!;
@@ -429,7 +429,7 @@ describe('challenges', () => {
 describe('advisor', () => {
   it('flags transit gaps with a location and clears them when served', async () => {
     const { advise } = await import('../ui/advisor');
-    const { cityMetrics } = await import('../ui/metrics');
+    const { cityMetricsSync: cityMetrics } = await import('../ui/metrics');
     const base = gridFixture();
     const m = cityMetrics(base);
     const tips = advise(base, m, m, null, new Map());

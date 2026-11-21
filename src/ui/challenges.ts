@@ -16,7 +16,7 @@ export interface Challenge {
   suggestFor?: string[];
 }
 
-const pct = (x: number) => `${Math.round(x * 100)}%`;
+const pct = (x: number) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '…');
 
 export const CHALLENGES: Challenge[] = [
   {

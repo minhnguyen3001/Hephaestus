@@ -30,6 +30,7 @@ A browser-based 3D city-building and urban-planning simulator built on **real-wo
   - **Transit riders**: riders choose a line that serves both ends of their trip. They walk to the stop, wait, board, ride, get off and walk on. Trains run on real above-ground rail.
 - **Urban impact dashboard**:
   - Housing and job capacity, floor area, road length and buildings, compared before and after your edits.
+  - Walk access: the share of residents within a 400 m walk of transit and a 300 m walk of a park, measured along streets.
   - Live traffic metrics and per-line transit ridership.
   - A **traffic flow layer** colours roads by speed (the **Traffic** button in the sim bar).
   - **Pick a time of day** (now, morning rush, midday, evening rush, night) and the simulation re-seeds traffic for that hour.
