@@ -1,108 +1,173 @@
-# Ptah
+# Ptah: Real-World City Simulator
 
-**Live demo:** https://minhnguyen3001.github.io/Ptah/
+[![status](https://img.shields.io/badge/status-live%20demo-d4a017)](https://minhnguyen3001.github.io/Ptah/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![three.js](https://img.shields.io/badge/three.js-WebGL2-000000?logo=threedotjs&logoColor=white)](https://threejs.org/)
+[![Vite](https://img.shields.io/badge/Vite-build-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![cost](https://img.shields.io/badge/hosting-%240%20(GitHub%20Pages)-2ea44f)](https://minhnguyen3001.github.io/Ptah/)
+[![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-A browser-based 3D city-building and urban-planning simulator built on **real-world geography**. Search almost any place on Earth, explore its actual streets and buildings in 3D, redesign them, and watch a living simulation of synthetic people, cars, motorbikes, buses and trains respond.
+A browser-based **3D city-building and urban-planning simulator** built on **real-world geography**. Search almost any place on Earth, walk its real streets and buildings in 3D, redesign them, and watch a living simulation of people, cars, bikes, buses and trains react to your plan.
 
-> Early preview (Phase 1). See [TODO.md](TODO.md) for what is and isn't done, and [HANDOFF.md](HANDOFF.md) for the current engineering state.
+This is **Minh Nguyen's** project, built and hosted entirely with **free, open data and free services**.
 
-## What works today
+**▶ Play it now: https://minhnguyen3001.github.io/Ptah/** (no install, no account; best in a recent Chrome or Edge on a desktop or laptop)
 
-- **Global search**: cities, streets, landmarks, or `lat, lon` coordinates (OpenStreetMap Nominatim).
-- **Real-world 3D city**, built from:
-  - **OpenStreetMap**: building footprints and heights, roads with lanes, traffic signals, rail and elevated rail, water, parks, multipolygon relations, and **sea derived from coastlines**.
-  - **Real terrain** from AWS Terrain Tiles, so hills look right in places like San Francisco and Hong Kong.
-- **City packs**: featured cities ship as pre-built data packs. They load instantly and work offline.
-- **Honest data labels**: each building's height is shown as *measured*, *from floor count*, *estimated* or *changed by you*. A layer highlights all estimated data.
-- **360° camera**: orbit, tilt, pan and zoom by mouse, touch or keyboard. Aerial, district and street-level presets. Double-click to orbit a building. Follow any vehicle or person.
-- **2D plan view**: a Canvas2D view with the same data, tools and simulation. It's used automatically on devices without WebGL.
-- **Planning tools**:
-  - Place buildings.
-  - Draw roads. They form real intersections and T-junctions with existing streets.
-  - Bulldoze buildings and roads, and change height and land use.
-  - **Draw bus lines and elevated metro lines**, and set how often each one runs.
-  - Undo and redo.
-- **Scenarios**: real-world data stays untouched. Your proposal is a list of edits, toggled against the **Original** city. Projects autosave locally.
-- **Living city simulation** (synthetic agents, run in a Web Worker):
-  - **Trips**: generated from building capacity, so homes send people to jobs, schools, shops and parks. Timing follows a daily rush-hour demand curve.
-  - **Regional travel modes**: the US is car-heavy, Vietnam is motorbike-heavy with lane filtering, the Netherlands is bicycle-heavy, and Japan and the UK drive on the left.
-  - **Traffic**: vehicles follow each other in lanes, queue, stop at red lights and spill back. Traffic signals are visible, and pedestrians wait for the walk phase.
-  - **Transit riders**: riders choose a line that serves both ends of their trip. They walk to the stop, wait, board, ride, get off and walk on. Trains run on real above-ground rail.
-- **Urban impact dashboard**:
-  - Housing and job capacity, floor area, road length and buildings, compared before and after your edits.
-  - Walk access: the share of residents within a 400 m walk of transit and a 300 m walk of a park, measured along streets.
-  - Live traffic metrics and per-line transit ridership.
-  - A **traffic flow layer** colours roads by speed (the **Traffic** button in the sim bar).
-  - **Pick a time of day** (now, morning rush, midday, evening rush, night) and the simulation re-seeds traffic for that hour.
-  - A chart shows congestion by hour for the **real city and your proposal side by side**: run the same hours on Original and Proposed to compare.
-- **Save image**: download a picture of the current view.
-- **Day/night cycle**: windows light up at night.
-- **Adaptive graphics**: Low, Medium, High and Auto.
-- Responsive layout for desktop, tablet and phone.
+---
 
-## Quick start
+## Contents
+1. [What you can do](#what-you-can-do)
+2. [How to play (2-minute guide)](#how-to-play-2-minute-guide)
+3. [Run it on your own computer](#run-it-on-your-own-computer)
+4. [How it works](#how-it-works)
+5. [Where the data comes from](#where-the-data-comes-from)
+6. [Limits and honesty notes](#limits-and-honesty-notes)
+7. [For developers](#for-developers)
 
-Prerequisites: **Node.js 20+** and npm. No API keys are required.
+---
+
+## What you can do
+
+| | |
+| --- | --- |
+| 🌍 **Explore any city** | Search a city, street, landmark or `lat, lon`. Eight featured cities load instantly: Chicago, Manhattan, Saigon, Amsterdam, Shibuya, San Francisco, Hong Kong and London. |
+| 🏙️ **See it in 3D** | Real buildings, roads, rail, water, parks and hills, about 10 km across. You can also switch to a flat 2D plan. |
+| 🛠️ **Redesign it** | Place or demolish buildings, draw roads, zone whole blocks, and draw bus and metro lines. Undo and redo work for everything. |
+| 🚦 **Watch it live** | Thousands of simulated people drive, cycle, walk and ride transit. Traffic lights, jams and crowds happen as they would in the real city. |
+| ⏰ **Pick a time** | Jump to the morning rush, midday, the evening rush or night, and see how traffic changes. |
+| 📊 **Measure the impact** | Compare **Original** and **Proposed**: housing, jobs, walk access to transit and parks, and congestion by hour. |
+| 🔗 **Share it** | Copy a link that contains your whole plan, or save a picture of the view. |
+
+---
+
+## How to play (2-minute guide)
+
+1. **Open** https://minhnguyen3001.github.io/Ptah/ and click a featured city (for example **Chicago Loop**), or type any place in the search box.
+2. **Look around.**
+   - **Mouse:** left-drag to orbit, right-drag to pan, scroll to zoom.
+   - **Touch:** one finger to orbit, two to pan or zoom.
+   - **Keyboard:** `W A S D` to move, `Q`/`E` to turn, `R`/`F` to tilt, `+`/`-` to zoom.
+   - The **City · Aerial · District · Street** buttons jump to preset views.
+3. **Click anything** to inspect it: a building, a road, or a moving car or person (then press **Follow**).
+4. **Change the city** with the toolbar on the left, or the number keys:
+
+   | Key | Tool | What it does |
+   | --- | --- | --- |
+   | `1` | Select | Inspect things, and edit a building's height or use |
+   | `2` | Place | Add a new building |
+   | `3` | Draw | Draw a road; it joins existing streets automatically |
+   | `4` | Bulldoze | Remove a building or road |
+   | `5` | Transit | Click stops to draw a bus or metro line, then **Finish line** |
+   | `6` | Zone | Draw an area to fill it with new homes, shops or offices |
+   | `7` | Note | Pin a comment on the map |
+   | `8` | Event | Start a concert or game crowd (it uses the real venue if there is one nearby) |
+
+5. **Run the simulation** with the bar at the bottom.
+   - Press ▶ or `Space` to play or pause, and choose a speed (1×–60×).
+   - **Jump to…** sets the time of day, and **Traffic** colours streets green to red by speed.
+6. **See the impact.** Open the **dashboard** on the right, and use **Original / Proposed** at the top to compare.
+7. **Share** your plan with the **Share** button, which copies a link. Use **Save image** for a picture.
+
+> 💡 If it feels slow, choose **Graphics: Low** or **Auto** in the top-right corner.
+
+---
+
+## Run it on your own computer
+
+You only need this if you want to change the code. To play, use the link above.
+
+**You need:** [Node.js 20 or newer](https://nodejs.org/) (it includes `npm`) and [Git](https://git-scm.com/). No API keys or accounts are needed.
 
 ```bash
+# 1. Download the project
+git clone https://github.com/minhnguyen3001/Ptah.git
+cd Ptah
+
+# 2. Install the libraries it uses (once)
 npm install
-npm run dev        # http://localhost:5173
+
+# 3. Start it
+npm run dev
 ```
+
+Then open **http://localhost:5173** in your browser. Changes to the code show up straight away.
+
+**Other useful commands:**
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Development server with hot reload |
-| `npm run build` | Typecheck + production build to `dist/` |
-| `npm run preview` | Serve the production build |
-| `npm run typecheck` | TypeScript only |
-| `npm test` | Unit tests (Vitest): geo parsing, routing, edits, simulation |
-| `npx playwright test` | End-to-end tests in a real browser (featured cities use bundled packs; terrain and search need internet) |
-| `npx tsx scripts/build-city-packs.ts ["Name"]` | Rebuild static OSM data packs for featured cities into `public/packs/` |
+| `npm test` | Run the unit tests |
+| `npm run build` | Check types and build the production site into `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npx playwright install chromium` | One-time setup for the browser tests |
+| `npx playwright test e2e/smoke.spec.ts` | Run the browser tests (needs internet) |
 
-The first time, `npx playwright install chromium` may be needed for the e2e test.
+---
 
-## Architecture (summary)
+## How it works
 
 ```
-src/
-  geo/       OSM/Overpass loading + parsing, geocoding, local projection, geometry utils
-  sim/       Road graph + A* routing, regional profiles, agent simulation (pure TS, no rendering)
-  project/   Scenario edit model (immutable base + edits, undo/redo), local persistence
-  render/    three.js engine: merged/instanced geometry, picking, camera, tools, day/night, adaptive quality
-  ui/        React UI: landing, workspace, inspector, dashboard, simulation controls
-e2e/         Playwright smoke test
-docs/        ARCHITECTURE.md, ROADMAP.md, DECISIONS.md (ADR log)
+ Real-world data (OpenStreetMap, terrain, vector tiles)
+          │  loaded in the browser, cached, parsed in a background thread
+          ▼
+ World model ──► your edits (a list on top of the untouched real city)
+          │
+          ├──► 3D renderer (three.js / WebGL2) or 2D plan (Canvas)
+          └──► Simulation (Web Worker): trips, traffic, transit, signals
+                     │
+                     ▼
+              Dashboard, advisor and charts
 ```
 
-The simulation is fully separate from rendering, so it can move to a Web Worker or the server without changes. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **No server.** Everything runs in your browser, and the site is static files on GitHub Pages. That's why hosting costs $0.
+- **The real city is never changed.** Your plan is a list of edits laid on top of it, so **Original vs Proposed** is a single click, and a share link is just that list, compressed.
+- **The simulation runs in a background thread** (a Web Worker), so the 3D view stays smooth.
 
-**Stack:** TypeScript, React 18, Vite 5, three.js (WebGL2), Canvas2D, Web Workers, Vitest, Playwright. There is no backend; everything runs in the browser at zero hosting cost.
+Code layout:
 
-## Geographic data and attribution
+| Folder | Contents |
+| --- | --- |
+| `src/geo/` | Loading and parsing map data, terrain, tiles, the walking network |
+| `src/sim/` | Road graph, routing and the agent simulation (plain TypeScript, no graphics) |
+| `src/project/` | The edit model, undo/redo, saving and share links |
+| `src/render/` | The 3D engine, the 2D plan view and the editing tools |
+| `src/ui/` | Screens, panels, the dashboard, the advisor and the tour |
+| `public/` | Pre-built data for the featured cities |
 
-- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL), shown in the app.
-- Terrain: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (open data, free).
-- **Featured cities** load from static packs in `public/packs/`, built by `scripts/build-city-packs.ts`. That makes them fast, reliable and free to serve.
-- **Any other place** is loaded live from the free **public Overpass API**, with several mirrors and timeouts, and searched through **public Nominatim**. These services can be slow or busy, and their limits make them unsuitable for heavy production traffic. The project budget is $0, so the plan is to grow the static pack pipeline. See [docs/DECISIONS.md](docs/DECISIONS.md).
-- Loaded areas and terrain are cached in the browser (Cache API).
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-## Known limitations
+---
 
-- Tunnels are hidden and excluded from the simulation. Bridges render at ground level.
-- Very large water relations (over 500 members) are skipped. Lakes mapped as coastline (like the Great Lakes) work.
-- Generated bus routes are not real GTFS routes. Mode shares are illustrative assumptions.
-- No accounts, sharing or collaboration yet. Projects are stored in this browser only.
-- Live Overpass loading of non-featured places can take 30–60 s when public servers are busy.
-- **Simulation results are illustrative, not forecasts.** This is not a substitute for professional engineering or transport studies.
+## Where the data comes from
 
-## Deployment
+| Data | Source | License |
+| --- | --- | --- |
+| Buildings, roads, rail, water, parks, venues | [OpenStreetMap](https://www.openstreetmap.org/copyright) via the public Overpass API | ODbL |
+| Wider city around you (the outer ring) | [OpenFreeMap](https://openfreemap.org/) vector tiles | ODbL / OpenMapTiles |
+| Hills and terrain | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | Open data |
+| Place search | OpenStreetMap Nominatim | ODbL |
 
-Every push to `main` builds and deploys to **GitHub Pages** for free, using `.github/workflows/pages.yml`. The production build uses the base path `/Ptah/`. To build the same thing locally, run `npm run build:pages`.
+Featured cities ship as pre-built files, so they load fast without busy public servers. Other places load live, which can take 30–120 seconds per area when those servers are busy.
 
-## Contributing
+---
 
-Run `npm run build && npm test` before committing. Keep simulation logic in `src/sim` free of three.js and DOM imports.
+## Limits and honesty notes
+
+- **Simulation results are illustrative, not forecasts.** The people are synthetic, and travel habits per country are assumptions. Don't use it as a substitute for professional traffic or planning studies.
+- Estimated data is labelled. A building height can be *measured*, *from floor count*, *estimated* or *changed by you*, and a layer highlights the estimates.
+- Buildings in the outer ring are for viewing only. Click **Load detail here** to make that area editable.
+- Generated bus routes aren't real timetables. Mapped subway lines use distinct but not official colours.
+- Plans are saved in your browser only. Use a share link to move a plan to another device.
+
+---
+
+## For developers
+
+- Engineering state and next steps: [HANDOFF.md](HANDOFF.md) and [TODO.md](TODO.md).
+- Before committing, run `npm run build && npm test`. Keep `src/sim` free of three.js and DOM code.
+- Every push to `main` is tested and deployed automatically to GitHub Pages (`.github/workflows/pages.yml`, base path `/Ptah/`). To build the same thing locally, run `npm run build:pages`.
 
 ## License
 
-BSD 3-Clause, see [LICENSE](LICENSE). Map data has its own license (ODbL).
+Code: BSD 3-Clause (see [LICENSE](LICENSE)). Map data keeps its own licenses (see above).
